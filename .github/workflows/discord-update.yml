@@ -1,0 +1,196 @@
+name: Discord Update
+
+on:
+  workflow_run:
+    workflows:
+      - Docker Image
+    types:
+      - completed
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Optional version label to include in the title
+        required: false
+      title:
+        description: Announcement title
+        required: false
+      summary:
+        description: Optional notes to show above the changes
+        required: false
+      changes:
+        description: One change per line
+        required: false
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+concurrency:
+  group: discord-update-${{ github.event.workflow_run.head_branch || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  notify:
+    name: Notify Discord
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    env:
+      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Build announcement
+        id: announcement
+        env:
+          ACTIONS_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CURRENT_RUN_ID: ${{ github.event.workflow_run.id }}
+          CURRENT_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_TITLE: ${{ inputs.title }}
+          INPUT_SUMMARY: ${{ inputs.summary }}
+          INPUT_CHANGES: ${{ inputs.changes }}
+        run: |
+          set -euo pipefail
+
+          version="${INPUT_VERSION}"
+          if [ -z "$version" ]; then
+            version="$(git tag --points-at HEAD | sort -V | tail -n 1)"
+          fi
+          if [ -z "$version" ]; then
+            version="latest"
+          fi
+
+          title="${INPUT_TITLE}"
+          if [ -z "$title" ]; then
+            if [ "$version" = "latest" ]; then
+              title="Augur update"
+            else
+              title="Augur update ${version}"
+            fi
+          fi
+
+          summary="${INPUT_SUMMARY}"
+          if [ -z "$summary" ]; then
+            summary=""
+          fi
+
+          changes="${INPUT_CHANGES}"
+          if [ -z "$changes" ]; then
+            previous_image_sha="$(
+              node <<'NODE' || true
+          (async () => {
+            const token = process.env.ACTIONS_TOKEN;
+            const repo = process.env.GITHUB_REPOSITORY;
+            const currentRunID = Number(process.env.CURRENT_RUN_ID || 0);
+            const branch = process.env.CURRENT_HEAD_BRANCH || "";
+            if (!token || !repo || !currentRunID) return;
+
+            const url = `https://api.github.com/repos/${repo}/actions/workflows/docker-image.yml/runs?status=success&event=push&per_page=50`;
+            const response = await fetch(url, {
+              headers: {
+                "Accept": "application/vnd.github+json",
+                "Authorization": `Bearer ${token}`,
+                "X-GitHub-Api-Version": "2022-11-28"
+              }
+            });
+            if (!response.ok) return;
+
+            const payload = await response.json();
+            const previous = (payload.workflow_runs || []).find((run) => {
+              return run.id !== currentRunID &&
+                run.conclusion === "success" &&
+                run.head_sha &&
+                (!branch || run.head_branch === branch);
+            });
+            if (previous) process.stdout.write(previous.head_sha);
+          })().catch(() => {});
+          NODE
+            )"
+            if [ -n "$previous_image_sha" ] && git cat-file -e "${previous_image_sha}^{commit}" 2>/dev/null; then
+              range="${previous_image_sha}..HEAD"
+            elif git rev-parse --verify HEAD^ >/dev/null 2>&1; then
+              range="HEAD^..HEAD"
+            else
+              range="HEAD"
+            fi
+            changes="$(git log --reverse --pretty=format:'%s' --no-merges "$range" 2>/dev/null | sed -E 's/^(feat|fix|docs|ci|chore|refactor|test|style|perf)(\([^)]+\))?:[[:space:]]*//I' | sed -E 's/^[*-][[:space:]]*//' | awk 'NF { line = tolower($0); if (line !~ /github actions|workflow|dependency review|codeql|readme badge|force_javascript_actions|checkout|setup-go/) { print; count++; if (count == 10) exit } }' || true)"
+          fi
+          if [ -z "$changes" ]; then
+            changes="General fixes and improvements."
+          fi
+
+          {
+            echo "version=$version"
+            echo "title=$title"
+            echo "summary=$summary"
+            echo "changes<<AUGUR_CHANGES"
+            echo "$changes"
+            echo "AUGUR_CHANGES"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Skip when webhook is missing
+        if: env.DISCORD_WEBHOOK_URL == ''
+        run: echo "DISCORD_WEBHOOK_URL is not configured; skipping Discord notification."
+
+      - name: Send Discord update
+        if: env.DISCORD_WEBHOOK_URL != ''
+        env:
+          ANNOUNCE_VERSION: ${{ steps.announcement.outputs.version }}
+          ANNOUNCE_TITLE: ${{ steps.announcement.outputs.title }}
+          ANNOUNCE_SUMMARY: ${{ steps.announcement.outputs.summary }}
+          ANNOUNCE_CHANGES: ${{ steps.announcement.outputs.changes }}
+        run: |
+          node <<'NODE'
+          const webhook = process.env.DISCORD_WEBHOOK_URL;
+          const version = process.env.ANNOUNCE_VERSION || "latest";
+          const title = process.env.ANNOUNCE_TITLE || (version === "latest" ? "Augur update" : `Augur update ${version}`);
+          const notes = (process.env.ANNOUNCE_SUMMARY || "").trim();
+          const changes = (process.env.ANNOUNCE_CHANGES || "")
+            .split(/\r?\n/)
+            .map((line) => line.trim())
+            .filter(Boolean)
+            .slice(0, 10);
+
+          const changeText = changes.length
+            ? changes.map((line) => `- ${line}`).join("\n")
+            : "- General fixes and improvements.";
+          const noteText = notes ? `${notes}\n\n${changeText}` : changeText;
+
+          const payload = {
+            username: "Augur Updates",
+            allowed_mentions: { parse: [] },
+            embeds: [
+              {
+                title,
+                color: 13909800,
+                fields: [
+                  {
+                    name: "Notes",
+                    value: noteText.slice(0, 1024)
+                  }
+                ],
+                footer: { text: "Augur" },
+                timestamp: new Date().toISOString()
+              }
+            ]
+          };
+
+          const response = await fetch(webhook, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+          });
+          if (!response.ok) {
+            throw new Error(`Discord webhook failed with HTTP ${response.status}: ${await response.text()}`);
+          }
+          NODE
