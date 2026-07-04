@@ -1,0 +1,27 @@
+{
+  "discord": {
+    "token": "replace-me",
+    "guild_id": "",
+    "presence": {
+      "enabled": true,
+      "status": "online",
+      "type": "watching",
+      "message": "Seerr requests"
+    }
+  },
+  "seer": {
+    "base_url": "https://seer.example.com",
+    "api_key": "replace-me",
+    "timeout": "15s"
+  },
+  "link": {
+    "public_url": "https://seer.example.com",
+    "require_match": true
+  },
+  "storage": {
+    "path": "augur-state.json"
+  },
+  "worker": {
+    "poll_interval": "2m"
+  }
+}

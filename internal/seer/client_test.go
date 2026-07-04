@@ -1,0 +1,127 @@
+package seer
+
+import (
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"strings"
+	"testing"
+	"time"
+)
+
+func TestIsAvailable(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		req  Request
+		want bool
+	}{
+		{name: "string available", req: Request{Media: &Media{Status: "AVAILABLE"}}, want: true},
+		{name: "numeric available", req: Request{Media: &Media{Status: float64(5)}}, want: true},
+		{name: "pending", req: Request{Media: &Media{Status: float64(2)}}, want: false},
+		{name: "missing media", req: Request{}, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := IsAvailable(tt.req); got != tt.want {
+				t.Fatalf("IsAvailable() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFindUserByDiscordIDUsesNotificationSettings(t *testing.T) {
+	t.Parallel()
+	client := New(Config{BaseURL: "http://seerr.test", APIKey: "key", Timeout: time.Second})
+	client.httpClient = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		switch r.URL.Path {
+		case "/api/v1/user":
+			return jsonResponse(t, map[string]any{
+				"results": []map[string]any{
+					{"id": 1, "email": "one@example.test"},
+					{"id": 2, "email": "two@example.test"},
+				},
+			}), nil
+		case "/api/v1/user/1/settings/notifications":
+			return jsonResponse(t, map[string]any{"discordIds": []string{"111"}}), nil
+		case "/api/v1/user/2/settings/notifications":
+			return jsonResponse(t, map[string]any{"discordIds": []string{"222"}}), nil
+		default:
+			return notFoundResponse(), nil
+		}
+	})}
+
+	user, ok, err := client.FindUserByDiscordID(context.Background(), "222")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("user not found")
+	}
+	if user.ID != 2 {
+		t.Fatalf("user ID = %d, want 2", user.ID)
+	}
+}
+
+func TestRequestMediaUsesSeerrUserIDAndAllSeasons(t *testing.T) {
+	t.Parallel()
+	var got map[string]any
+	client := New(Config{BaseURL: "http://seerr.test", APIKey: "key", Timeout: time.Second})
+	client.httpClient = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path != "/api/v1/request" {
+			return notFoundResponse(), nil
+		}
+		if key := r.Header.Get("X-Api-Key"); key != "key" {
+			t.Fatalf("X-Api-Key = %q, want key", key)
+		}
+		if userHeader := r.Header.Get("X-Api-User"); userHeader != "" {
+			t.Fatalf("X-Api-User = %q, want empty", userHeader)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Fatal(err)
+		}
+		return jsonResponse(t, map[string]any{"id": 44, "status": 2}), nil
+	})}
+
+	req, err := client.RequestMedia(context.Background(), 7, "tv", 123)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if req.ID != 44 {
+		t.Fatalf("request ID = %d, want 44", req.ID)
+	}
+	if got["userId"] != float64(7) {
+		t.Fatalf("userId = %#v, want 7", got["userId"])
+	}
+	if got["seasons"] != "all" {
+		t.Fatalf("seasons = %#v, want all", got["seasons"])
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {
+	return f(r)
+}
+
+func jsonResponse(t *testing.T, value any) *http.Response {
+	t.Helper()
+	var body strings.Builder
+	if err := json.NewEncoder(&body).Encode(value); err != nil {
+		t.Fatal(err)
+	}
+	return &http.Response{
+		StatusCode: 200,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(body.String())),
+	}
+}
+
+func notFoundResponse() *http.Response {
+	return &http.Response{
+		StatusCode: 404,
+		Body:       io.NopCloser(strings.NewReader("not found")),
+	}
+}

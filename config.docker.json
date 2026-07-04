@@ -1,0 +1,27 @@
+{
+  "discord": {
+    "token": "",
+    "guild_id": "",
+    "presence": {
+      "enabled": true,
+      "status": "online",
+      "type": "watching",
+      "message": "Seerr requests"
+    }
+  },
+  "seer": {
+    "base_url": "",
+    "api_key": "",
+    "timeout": "15s"
+  },
+  "link": {
+    "public_url": "",
+    "require_match": true
+  },
+  "storage": {
+    "path": "/data/augur-state.json"
+  },
+  "worker": {
+    "poll_interval": "2m"
+  }
+}

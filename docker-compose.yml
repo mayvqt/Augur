@@ -1,0 +1,11 @@
+services:
+  augur:
+    image: ghcr.io/mayvqt/augur:latest
+    build: .
+    container_name: augur
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - ./data:/data
