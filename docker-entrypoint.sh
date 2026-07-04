@@ -29,11 +29,19 @@ if [ "$(id -u)" = "0" ]; then
     usermod -o -u "$PUID" augur
   fi
 
-  mkdir -p /data
-  if [ ! -e /data/config.json ]; then
-    cp /app/config.docker.json /data/config.json
+  CONFIG_PATH="${AUGUR_CONFIG:-/data/config.json}"
+  STORAGE_PATH="${AUGUR_STORAGE_PATH:-/data/augur-state.json}"
+  CONFIG_DIR="$(dirname "$CONFIG_PATH")"
+  STORAGE_DIR="$(dirname "$STORAGE_PATH")"
+
+  mkdir -p "$CONFIG_DIR" "$STORAGE_DIR"
+  if [ ! -e "$CONFIG_PATH" ]; then
+    cp /app/config.docker.json "$CONFIG_PATH"
   fi
-  chown -R augur:augur /data
+  chown augur:augur "$CONFIG_DIR" "$STORAGE_DIR" "$CONFIG_PATH"
+  if [ -e "$STORAGE_PATH" ]; then
+    chown augur:augur "$STORAGE_PATH"
+  fi
 
   if [ "${1:-}" != "" ] && [ "${1#-}" != "$1" ]; then
     set -- augur "$@"
