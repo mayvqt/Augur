@@ -10,6 +10,9 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/augur ./cmd/augur
 
 FROM alpine:3.21
+LABEL org.opencontainers.image.source="https://github.com/mayvqt/Augur" \
+      org.opencontainers.image.title="Augur" \
+      org.opencontainers.image.description="Discord request bot for Seerr"
 RUN apk add --no-cache ca-certificates shadow su-exec tzdata \
     && addgroup -g 1000 augur \
     && adduser -D -H -u 1000 -G augur augur \
