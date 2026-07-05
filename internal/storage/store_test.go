@@ -2,7 +2,9 @@ package storage
 
 import (
 	"context"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -42,5 +44,30 @@ func TestStorePersistsWatches(t *testing.T) {
 	}
 	if len(watches) != 0 {
 		t.Fatalf("open watches = %d, want 0", len(watches))
+	}
+}
+
+func TestStoreNormalizesMissingWatches(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "state.json")
+	if err := os.WriteFile(path, []byte(`{}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), `"watches": null`) {
+		t.Fatalf("store wrote nil watches slice: %s", data)
+	}
+	if !strings.Contains(string(data), `"watches": []`) {
+		t.Fatalf("store did not write empty watches array: %s", data)
 	}
 }

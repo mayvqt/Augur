@@ -19,11 +19,14 @@ type cachedSelection struct {
 	expiresAt time.Time
 }
 
-func (c *selectionCache) set(cacheID, key string, result seer.SearchResult) {
+func (c *selectionCache) setMany(cacheID string, results map[string]seer.SearchResult) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.initLocked()
-	c.items[cacheID+":"+key] = cachedSelection{result: result, expiresAt: time.Now().Add(15 * time.Minute)}
+	expiresAt := time.Now().Add(15 * time.Minute)
+	for key, result := range results {
+		c.items[cacheKey(cacheID, key)] = cachedSelection{result: result, expiresAt: expiresAt}
+	}
 	c.pruneLocked()
 }
 
@@ -31,7 +34,7 @@ func (c *selectionCache) get(cacheID, key string) (seer.SearchResult, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.initLocked()
-	item, ok := c.items[cacheID+":"+key]
+	item, ok := c.items[cacheKey(cacheID, key)]
 	if !ok || time.Now().After(item.expiresAt) {
 		return seer.SearchResult{}, false
 	}
@@ -51,6 +54,10 @@ func (c *selectionCache) pruneLocked() {
 			delete(c.items, key)
 		}
 	}
+}
+
+func cacheKey(cacheID, key string) string {
+	return cacheID + ":" + key
 }
 
 func randomID() string {

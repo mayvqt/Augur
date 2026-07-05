@@ -100,6 +100,22 @@ func TestRequestMediaUsesSeerrUserIDAndAllSeasons(t *testing.T) {
 	}
 }
 
+func TestDoRejectsOversizedResponses(t *testing.T) {
+	t.Parallel()
+	client := New(Config{BaseURL: "http://seerr.test", APIKey: "key", Timeout: time.Second})
+	client.httpClient = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: 200,
+			Body:       io.NopCloser(strings.NewReader(strings.Repeat("x", maxResponseBodyBytes+1))),
+		}, nil
+	})}
+
+	err := client.do(context.Background(), http.MethodGet, "/api/v1/request/1", nil, &Request{})
+	if err == nil || !strings.Contains(err.Error(), "response exceeded") {
+		t.Fatalf("err = %v, want oversized response error", err)
+	}
+}
+
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {

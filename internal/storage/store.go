@@ -21,7 +21,7 @@ type Watch struct {
 
 type Store struct {
 	path string
-	mu   sync.Mutex
+	mu   sync.RWMutex
 	data state
 }
 
@@ -49,6 +49,7 @@ func Open(path string) (*Store, error) {
 	if err := json.Unmarshal(data, &store.data); err != nil {
 		return nil, err
 	}
+	store.data.normalize()
 	return store, nil
 }
 
@@ -76,9 +77,9 @@ func (s *Store) OpenWatches(ctx context.Context) ([]Watch, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	var out []Watch
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]Watch, 0, len(s.data.Watches))
 	for _, watch := range s.data.Watches {
 		if watch.CompletedAt.IsZero() {
 			out = append(out, watch)
@@ -112,15 +113,8 @@ func (s *Store) save() error {
 }
 
 func (s *Store) saveLocked() error {
-	data, err := json.MarshalIndent(s.data, "", "  ")
-	if err != nil {
-		return err
-	}
-	tmp := s.path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, s.path)
+	s.data.normalize()
+	return writeStateFile(s.path, s.data)
 }
 
 func ensureDir(path string) error {
@@ -129,4 +123,39 @@ func ensureDir(path string) error {
 		return nil
 	}
 	return os.MkdirAll(dir, 0o755)
+}
+
+func (s *state) normalize() {
+	if s.Watches == nil {
+		s.Watches = []Watch{}
+	}
+}
+
+func writeStateFile(path string, data state) error {
+	dir := filepath.Dir(path)
+	if dir == "." || dir == "" {
+		dir = "."
+	}
+	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer func() {
+		_ = os.Remove(tmpName)
+	}()
+	if err := tmp.Chmod(0o600); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	encoder := json.NewEncoder(tmp)
+	encoder.SetIndent("", "  ")
+	if err := encoder.Encode(data); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpName, path)
 }

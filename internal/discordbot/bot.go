@@ -150,6 +150,7 @@ func (b *Bot) handleRequest(s *discordgo.Session, i *discordgo.InteractionCreate
 	}
 	options := make([]discordgo.SelectMenuOption, 0, 25)
 	cacheID := randomID()
+	selections := make(map[string]seer.SearchResult, 25)
 	for _, result := range results {
 		if len(options) == 25 {
 			break
@@ -157,13 +158,14 @@ func (b *Bot) handleRequest(s *discordgo.Session, i *discordgo.InteractionCreate
 		label := truncate(optionLabel(result), 100)
 		description := truncate(optionDescription(result), 100)
 		key := strconv.Itoa(len(options))
-		b.cache.set(cacheID, key, result)
+		selections[key] = result
 		options = append(options, discordgo.SelectMenuOption{Label: label, Description: description, Value: key})
 	}
 	if len(options) == 0 {
 		b.edit(s, i, "No movies or shows matched that search.")
 		return
 	}
+	b.cache.setMany(cacheID, selections)
 	msg := "Pick the result to request."
 	_, err = s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
 		Content: &msg,
@@ -347,13 +349,14 @@ func releaseYear(result seer.SearchResult) string {
 }
 
 func truncate(s string, max int) string {
-	if len(s) <= max {
+	runes := []rune(s)
+	if len(runes) <= max {
 		return s
 	}
-	if max <= 1 {
-		return s[:max]
+	if max <= 3 {
+		return string(runes[:max])
 	}
-	return s[:max-1] + "..."
+	return string(runes[:max-3]) + "..."
 }
 
 func intPtr(v int) *int {

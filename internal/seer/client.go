@@ -14,6 +14,8 @@ import (
 	"time"
 )
 
+const maxResponseBodyBytes = 1 << 20
+
 type Client struct {
 	baseURL    string
 	apiKey     string
@@ -146,29 +148,16 @@ func (c *Client) NotificationSettings(ctx context.Context, userID int) (Notifica
 }
 
 func (c *Client) do(ctx context.Context, method, path string, body any, out any) error {
-	var reader io.Reader
-	if body != nil {
-		data, err := json.Marshal(body)
-		if err != nil {
-			return err
-		}
-		reader = bytes.NewReader(data)
-	}
-	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, reader)
+	req, err := c.newRequest(ctx, method, path, body)
 	if err != nil {
 		return err
-	}
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("X-Api-Key", c.apiKey)
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
 	}
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
-	data, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	data, err := readResponseBody(resp.Body)
 	if err != nil {
 		return err
 	}
@@ -179,6 +168,39 @@ func (c *Client) do(ctx context.Context, method, path string, body any, out any)
 		return nil
 	}
 	return json.Unmarshal(data, out)
+}
+
+func (c *Client) newRequest(ctx context.Context, method, path string, body any) (*http.Request, error) {
+	var reader io.Reader
+	if body != nil {
+		data, err := json.Marshal(body)
+		if err != nil {
+			return nil, err
+		}
+		reader = bytes.NewReader(data)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, reader)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("X-Api-Key", c.apiKey)
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	return req, nil
+}
+
+func readResponseBody(body io.Reader) ([]byte, error) {
+	limited := &io.LimitedReader{R: body, N: maxResponseBodyBytes + 1}
+	data, err := io.ReadAll(limited)
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maxResponseBodyBytes {
+		return nil, fmt.Errorf("seerr response exceeded %d bytes", maxResponseBodyBytes)
+	}
+	return data, nil
 }
 
 func (s NotificationSettings) HasDiscordID(discordID string) bool {

@@ -25,3 +25,14 @@ func TestLinkURLDoesNotDuplicateSettingsPath(t *testing.T) {
 		t.Fatalf("linkURL() = %q, want %q", got, want)
 	}
 }
+
+func TestTruncateIsUnicodeSafeAndHonorsLimit(t *testing.T) {
+	t.Parallel()
+	got := truncate("Cafe Noir: Édition longue", 17)
+	if got != "Cafe Noir: Édi..." {
+		t.Fatalf("truncate() = %q", got)
+	}
+	if len([]rune(got)) > 17 {
+		t.Fatalf("truncate() returned %d runes, want <= 17", len([]rune(got)))
+	}
+}
