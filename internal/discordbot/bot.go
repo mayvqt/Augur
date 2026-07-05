@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"augur/internal/config"
-	"augur/internal/seer"
+	"github.com/mayvqt/Augur/internal/config"
+	"github.com/mayvqt/Augur/internal/seer"
 
 	"github.com/bwmarrin/discordgo"
 )
@@ -243,7 +243,6 @@ func (b *Bot) linkURL(discordID string) string {
 		u.Path = strings.TrimRight(u.Path, "/") + discordPath
 	}
 	q := u.Query()
-	q.Set("discord_id", discordID)
 	q.Set("discordId", discordID)
 	u.RawQuery = q.Encode()
 	return u.String()

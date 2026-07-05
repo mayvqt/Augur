@@ -124,57 +124,29 @@ func defaults() Config {
 }
 
 func applyEnvironment(cfg *Config) error {
-	strings := []struct {
+	envStrings := []struct {
 		name   string
 		target *string
 	}{
 		{"AUGUR_DISCORD_TOKEN", &cfg.Discord.Token},
 		{"AUGUR_GUILD_ID", &cfg.Discord.GuildID},
-		{"AUGUR_PRESENCE_STATUS", &cfg.Discord.Presence.Status},
-		{"AUGUR_PRESENCE_TYPE", &cfg.Discord.Presence.Type},
-		{"AUGUR_PRESENCE_MESSAGE", &cfg.Discord.Presence.Message},
-		{"AUGUR_SEER_BASE_URL", &cfg.Seer.BaseURL},
 		{"AUGUR_SEERR_BASE_URL", &cfg.Seer.BaseURL},
-		{"AUGUR_SEER_API_KEY", &cfg.Seer.APIKey},
 		{"AUGUR_SEERR_API_KEY", &cfg.Seer.APIKey},
-		{"AUGUR_LINK_PUBLIC_URL", &cfg.Link.PublicURL},
-		{"AUGUR_SEER_PUBLIC_URL", &cfg.Link.PublicURL},
 		{"AUGUR_SEERR_PUBLIC_URL", &cfg.Link.PublicURL},
 		{"AUGUR_STORAGE_PATH", &cfg.Storage.Path},
 	}
-	for _, override := range strings {
+	for _, override := range envStrings {
 		if value, ok := os.LookupEnv(override.name); ok {
-			*override.target = stringsTrim(value)
+			*override.target = strings.TrimSpace(value)
 		}
 	}
 
-	if value, ok := os.LookupEnv("AUGUR_PRESENCE_ENABLED"); ok {
-		parsed, err := strconv.ParseBool(value)
-		if err != nil {
-			return fmt.Errorf("AUGUR_PRESENCE_ENABLED must be true or false: %w", err)
-		}
-		cfg.Discord.Presence.Enabled = parsed
-	}
 	if value, ok := os.LookupEnv("AUGUR_LINK_REQUIRE_MATCH"); ok {
 		parsed, err := strconv.ParseBool(value)
 		if err != nil {
 			return fmt.Errorf("AUGUR_LINK_REQUIRE_MATCH must be true or false: %w", err)
 		}
 		cfg.Link.RequireMatch = parsed
-	}
-	if value, ok := os.LookupEnv("AUGUR_SEER_TIMEOUT"); ok {
-		parsed, err := time.ParseDuration(value)
-		if err != nil {
-			return fmt.Errorf("AUGUR_SEER_TIMEOUT must be a duration: %w", err)
-		}
-		cfg.Seer.Timeout = Duration(parsed)
-	}
-	if value, ok := os.LookupEnv("AUGUR_SEERR_TIMEOUT"); ok {
-		parsed, err := time.ParseDuration(value)
-		if err != nil {
-			return fmt.Errorf("AUGUR_SEERR_TIMEOUT must be a duration: %w", err)
-		}
-		cfg.Seer.Timeout = Duration(parsed)
 	}
 	if value, ok := os.LookupEnv("AUGUR_WORKER_POLL_INTERVAL"); ok {
 		parsed, err := time.ParseDuration(value)
@@ -244,8 +216,4 @@ func isDiscordID(s string) bool {
 		}
 	}
 	return true
-}
-
-func stringsTrim(s string) string {
-	return strings.TrimSpace(s)
 }

@@ -8,10 +8,10 @@ import (
 	"sync"
 	"time"
 
-	"augur/internal/config"
-	"augur/internal/discordbot"
-	"augur/internal/seer"
-	"augur/internal/storage"
+	"github.com/mayvqt/Augur/internal/config"
+	"github.com/mayvqt/Augur/internal/discordbot"
+	"github.com/mayvqt/Augur/internal/seer"
+	"github.com/mayvqt/Augur/internal/storage"
 )
 
 type Runner struct {

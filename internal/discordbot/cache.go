@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"augur/internal/seer"
+	"github.com/mayvqt/Augur/internal/seer"
 )
 
 type selectionCache struct {

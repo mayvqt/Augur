@@ -41,6 +41,9 @@ jobs:
       - name: Run vet
         run: go vet ./...
 
+      - name: Run race detector
+        run: go test -race ./...
+
   publish:
     name: Build And Publish
     runs-on: ubuntu-latest

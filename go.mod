@@ -1,4 +1,4 @@
-module augur
+module github.com/mayvqt/Augur
 
 go 1.23
 

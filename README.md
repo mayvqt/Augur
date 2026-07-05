@@ -19,9 +19,9 @@ go run ./cmd/augur -config config.json
 
 If `discord.guild_id` is empty, commands are registered globally. Setting it to a guild ID makes updates appear faster while testing.
 
-## Environment Overrides
+## Environment
 
-All important config values can be overridden:
+Supported environment variables:
 
 - `AUGUR_CONFIG`
 - `AUGUR_DISCORD_TOKEN`
@@ -29,12 +29,9 @@ All important config values can be overridden:
 - `AUGUR_SEERR_BASE_URL`
 - `AUGUR_SEERR_PUBLIC_URL`
 - `AUGUR_SEERR_API_KEY`
-- `AUGUR_LINK_PUBLIC_URL`
 - `AUGUR_LINK_REQUIRE_MATCH`
 - `AUGUR_STORAGE_PATH`
 - `AUGUR_WORKER_POLL_INTERVAL`
-
-The older `AUGUR_SEER_*` names are also accepted as aliases.
 
 ## Seerr Notes
 

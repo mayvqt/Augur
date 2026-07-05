@@ -12,8 +12,8 @@ import (
 	"syscall"
 	_ "time/tzdata"
 
-	"augur/internal/app"
-	"augur/internal/config"
+	"github.com/mayvqt/Augur/internal/app"
+	"github.com/mayvqt/Augur/internal/config"
 )
 
 func main() {

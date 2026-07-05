@@ -27,26 +27,16 @@ type Config struct {
 }
 
 type SearchResult struct {
-	ID           int        `json:"id"`
-	MediaType    string     `json:"mediaType"`
-	Title        string     `json:"title"`
-	Name         string     `json:"name"`
-	ReleaseDate  string     `json:"releaseDate"`
-	FirstAirDate string     `json:"firstAirDate"`
-	MediaInfo    *MediaInfo `json:"mediaInfo"`
-}
-
-type MediaInfo struct {
-	Status any `json:"status"`
+	ID           int    `json:"id"`
+	MediaType    string `json:"mediaType"`
+	Title        string `json:"title"`
+	Name         string `json:"name"`
+	ReleaseDate  string `json:"releaseDate"`
+	FirstAirDate string `json:"firstAirDate"`
 }
 
 type User struct {
-	ID           int            `json:"id"`
-	Email        string         `json:"email"`
-	Username     string         `json:"username"`
-	DisplayName  string         `json:"displayName"`
-	PlexUsername string         `json:"plexUsername"`
-	Raw          map[string]any `json:"-"`
+	ID int `json:"id"`
 }
 
 type Request struct {
@@ -60,17 +50,8 @@ type Media struct {
 	Status any `json:"status"`
 }
 
-type TVDetails struct {
-	Seasons []Season `json:"seasons"`
-}
-
-type Season struct {
-	SeasonNumber int `json:"seasonNumber"`
-}
-
 type NotificationSettings struct {
-	DiscordEnabled bool     `json:"discordEnabled"`
-	DiscordIDs     []string `json:"discordIds"`
+	DiscordIDs []string `json:"discordIds"`
 }
 
 func New(cfg Config) *Client {
@@ -109,19 +90,15 @@ func (c *Client) FindUserByDiscordID(ctx context.Context, discordID string) (Use
 		values.Set("take", "100")
 		values.Set("skip", strconv.Itoa(skip))
 		var page struct {
-			Results []json.RawMessage `json:"results"`
+			Results []User `json:"results"`
 		}
 		if err := c.do(ctx, http.MethodGet, "/api/v1/user?"+values.Encode(), nil, &page); err != nil {
 			return User{}, false, err
 		}
-		for _, raw := range page.Results {
-			var user User
-			if err := json.Unmarshal(raw, &user); err != nil || user.ID == 0 {
+		for _, user := range page.Results {
+			if user.ID == 0 {
 				continue
 			}
-			var obj map[string]any
-			_ = json.Unmarshal(raw, &obj)
-			user.Raw = obj
 			settings, err := c.NotificationSettings(ctx, user.ID)
 			if err != nil {
 				return User{}, false, err
@@ -154,12 +131,6 @@ func (c *Client) RequestMedia(ctx context.Context, userID int, mediaType string,
 		return Request{}, err
 	}
 	return out, nil
-}
-
-func (c *Client) TVDetails(ctx context.Context, id int) (TVDetails, error) {
-	var out TVDetails
-	err := c.do(ctx, http.MethodGet, "/api/v1/tv/"+strconv.Itoa(id), nil, &out)
-	return out, err
 }
 
 func (c *Client) Request(ctx context.Context, id int) (Request, error) {
