@@ -25,7 +25,7 @@ func TestLoadParsesHumanDurations(t *testing.T) {
 			"public_url": "https://seer.example.test/link",
 			"require_match": true
 		},
-		"storage": {"path": "state.json"},
+		"storage": {"path": "state.db"},
 		"worker": {"poll_interval": "3m"}
 	}`
 	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {

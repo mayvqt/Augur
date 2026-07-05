@@ -42,6 +42,8 @@ Users paste the ID64 into Seerr. Augur then checks each user's Seerr notificatio
 | Network | `bridge`, unless your Seerr stack needs a custom Docker network. |
 | PUID / PGID | Unraid defaults are `99` / `100`. |
 
+Augur stores request watch state in `/data/augur-state.db` using SQLite with WAL journaling.
+
 ## Quick Checks
 
 - Slash commands missing: set `AUGUR_GUILD_ID`, restart Augur, and invite the bot with `applications.commands`.

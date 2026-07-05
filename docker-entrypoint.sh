@@ -30,7 +30,7 @@ if [ "$(id -u)" = "0" ]; then
   fi
 
   CONFIG_PATH="${AUGUR_CONFIG:-/data/config.json}"
-  STORAGE_PATH="${AUGUR_STORAGE_PATH:-/data/augur-state.json}"
+  STORAGE_PATH="${AUGUR_STORAGE_PATH:-/data/augur-state.db}"
   CONFIG_DIR="$(dirname "$CONFIG_PATH")"
   STORAGE_DIR="$(dirname "$STORAGE_PATH")"
 
@@ -41,6 +41,12 @@ if [ "$(id -u)" = "0" ]; then
   chown augur:augur "$CONFIG_DIR" "$STORAGE_DIR" "$CONFIG_PATH"
   if [ -e "$STORAGE_PATH" ]; then
     chown augur:augur "$STORAGE_PATH"
+  fi
+  if [ -e "$STORAGE_PATH-wal" ]; then
+    chown augur:augur "$STORAGE_PATH-wal"
+  fi
+  if [ -e "$STORAGE_PATH-shm" ]; then
+    chown augur:augur "$STORAGE_PATH-shm"
   fi
 
   if [ "${1:-}" != "" ] && [ "${1#-}" != "$1" ]; then

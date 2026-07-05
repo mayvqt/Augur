@@ -118,7 +118,7 @@ func defaults() Config {
 		Link: LinkConfig{
 			RequireMatch: true,
 		},
-		Storage: StorageConfig{Path: "augur-state.json"},
+		Storage: StorageConfig{Path: "augur-state.db"},
 		Worker:  WorkerConfig{PollInterval: Duration(2 * time.Minute)},
 	}
 }

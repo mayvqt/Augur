@@ -2,22 +2,22 @@ package storage
 
 import (
 	"context"
-	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 )
 
-func TestStorePersistsWatches(t *testing.T) {
+func TestStorePersistsWatchesAcrossRestart(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "state.json")
+	path := filepath.Join(t.TempDir(), "state.db")
+	createdAt := time.Date(2026, 7, 5, 1, 2, 3, 0, time.UTC)
+
 	store, err := Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.AddWatch(ctx, Watch{RequestID: 42, DiscordID: "123", Title: "The Thing", MediaType: "movie", CreatedAt: time.Now().UTC()}); err != nil {
+	if err := store.AddWatch(ctx, Watch{RequestID: 42, DiscordID: "123", Title: "The Thing", MediaType: "movie", CreatedAt: createdAt}); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.Close(); err != nil {
@@ -28,15 +28,21 @@ func TestStorePersistsWatches(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer reopened.Close()
 	watches, err := reopened.OpenWatches(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(watches) != 1 || watches[0].RequestID != 42 {
-		t.Fatalf("watches = %#v, want request 42", watches)
+	if len(watches) != 1 || watches[0].RequestID != 42 || !watches[0].CreatedAt.Equal(createdAt) {
+		t.Fatalf("watches = %#v, want persisted request 42", watches)
 	}
-	if _, ok, err := reopened.CompleteWatch(ctx, 42, time.Now().UTC()); err != nil || !ok {
+	completedAt := time.Date(2026, 7, 6, 4, 5, 6, 0, time.UTC)
+	completed, ok, err := reopened.CompleteWatch(ctx, 42, completedAt)
+	if err != nil || !ok {
 		t.Fatalf("CompleteWatch ok = %v err = %v, want ok", ok, err)
+	}
+	if !completed.CompletedAt.Equal(completedAt) {
+		t.Fatalf("completed_at = %s, want %s", completed.CompletedAt, completedAt)
 	}
 	watches, err = reopened.OpenWatches(ctx)
 	if err != nil {
@@ -47,27 +53,54 @@ func TestStorePersistsWatches(t *testing.T) {
 	}
 }
 
-func TestStoreNormalizesMissingWatches(t *testing.T) {
+func TestStoreUpsertDoesNotReopenCompletedWatch(t *testing.T) {
 	t.Parallel()
-	path := filepath.Join(t.TempDir(), "state.json")
-	if err := os.WriteFile(path, []byte(`{}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	store, err := Open(path)
+	ctx := context.Background()
+	store, err := Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.Close(); err != nil {
+	defer store.Close()
+
+	if err := store.AddWatch(ctx, Watch{RequestID: 7, DiscordID: "123", Title: "Old", MediaType: "movie", CreatedAt: time.Now().UTC()}); err != nil {
 		t.Fatal(err)
 	}
-	data, err := os.ReadFile(path)
+	if _, ok, err := store.CompleteWatch(ctx, 7, time.Now().UTC()); err != nil || !ok {
+		t.Fatalf("CompleteWatch ok = %v err = %v, want ok", ok, err)
+	}
+	if err := store.AddWatch(ctx, Watch{RequestID: 7, DiscordID: "456", Title: "Updated", MediaType: "tv", CreatedAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+
+	watches, err := store.OpenWatches(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(data), `"watches": null`) {
-		t.Fatalf("store wrote nil watches slice: %s", data)
+	if len(watches) != 0 {
+		t.Fatalf("open watches = %#v, want completed watch to stay closed", watches)
 	}
-	if !strings.Contains(string(data), `"watches": []`) {
-		t.Fatalf("store did not write empty watches array: %s", data)
+}
+
+func TestStoreUsesRecoverableSQLiteSettings(t *testing.T) {
+	t.Parallel()
+	store, err := Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	var journalMode string
+	if err := store.db.QueryRow("PRAGMA journal_mode").Scan(&journalMode); err != nil {
+		t.Fatal(err)
+	}
+	if journalMode != "wal" {
+		t.Fatalf("journal_mode = %q, want wal", journalMode)
+	}
+	var synchronous int
+	if err := store.db.QueryRow("PRAGMA synchronous").Scan(&synchronous); err != nil {
+		t.Fatal(err)
+	}
+	if synchronous != 2 {
+		t.Fatalf("synchronous = %d, want FULL", synchronous)
 	}
 }

@@ -19,6 +19,8 @@ go run ./cmd/augur -config config.json
 
 If `discord.guild_id` is empty, commands are registered globally. Setting it to a guild ID makes updates appear faster while testing.
 
+Augur stores request watch state in SQLite at `storage.path`. New configs use `augur-state.db`.
+
 ## Environment
 
 Supported environment variables:

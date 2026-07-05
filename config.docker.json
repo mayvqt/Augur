@@ -19,7 +19,7 @@
     "require_match": true
   },
   "storage": {
-    "path": "/data/augur-state.json"
+    "path": "/data/augur-state.db"
   },
   "worker": {
     "poll_interval": "2m"
