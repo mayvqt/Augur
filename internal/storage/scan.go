@@ -15,13 +15,7 @@ func selectOpenWatch(ctx context.Context, tx *sql.Tx, requestID int) (Watch, boo
 		WHERE request_id = ? AND completed_at IS NULL
 	`, requestID)
 	watch, err := scanWatch(row)
-	if errors.Is(err, sql.ErrNoRows) {
-		return Watch{}, false, nil
-	}
-	if err != nil {
-		return Watch{}, false, err
-	}
-	return watch, true, nil
+	return optionalScannedWatch(watch, err)
 }
 
 func scanWatches(rows *sql.Rows) ([]Watch, error) {
@@ -63,4 +57,19 @@ func scanWatch(scanner watchScanner) (Watch, error) {
 		watch.CompletedAt = parsedCompletedAt
 	}
 	return watch, nil
+}
+
+func scanOptionalWatch(scanner watchScanner) (Watch, bool, error) {
+	watch, err := scanWatch(scanner)
+	return optionalScannedWatch(watch, err)
+}
+
+func optionalScannedWatch(watch Watch, err error) (Watch, bool, error) {
+	if errors.Is(err, sql.ErrNoRows) {
+		return Watch{}, false, nil
+	}
+	if err != nil {
+		return Watch{}, false, err
+	}
+	return watch, true, nil
 }

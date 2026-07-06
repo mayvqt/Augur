@@ -55,6 +55,19 @@ func (s *Store) Close() error {
 	return s.db.Close()
 }
 
+func (s *Store) Ping(ctx context.Context) error {
+	if s == nil || s.db == nil {
+		return errors.New("storage is not open")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := s.db.PingContext(ctx); err != nil {
+		return fmt.Errorf("ping storage: %w", err)
+	}
+	return nil
+}
+
 func (s *Store) AddWatch(ctx context.Context, watch Watch) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -109,6 +122,21 @@ func (s *Store) OpenWatches(ctx context.Context) ([]Watch, error) {
 	}
 	defer rows.Close()
 	return scanWatches(rows)
+}
+
+func (s *Store) OpenWatch(ctx context.Context, requestID int) (Watch, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return Watch{}, false, err
+	}
+	if requestID <= 0 {
+		return Watch{}, false, errors.New("request_id must be positive")
+	}
+	row := s.db.QueryRowContext(ctx, `
+		SELECT request_id, discord_id, title, media_type, created_at, completed_at
+		FROM watches
+		WHERE request_id = ? AND completed_at IS NULL
+	`, requestID)
+	return scanOptionalWatch(row)
 }
 
 func (s *Store) CompleteWatch(ctx context.Context, requestID int, completedAt time.Time) (Watch, bool, error) {

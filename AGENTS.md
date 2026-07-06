@@ -2,79 +2,150 @@
 
 Guidance for coding agents working in this repository.
 
-## Project Shape
+## Mission
 
-Augur is a small Go service that connects Discord slash commands to Seerr requests, then watches accepted requests and sends Discord notifications when they become available.
+Augur is a small Go service that connects Discord slash commands to Seerr requests, watches accepted requests, and sends Discord notifications when media becomes available.
 
-Keep the code boring, explicit, and easy to scan. Prefer small files with one job over broad files that mix setup, workflow, formatting, transport, and persistence.
+Keep the code boring, explicit, hardened, and easy to scan. Prefer small files with one job over broad files that mix setup, workflow, formatting, transport, persistence, and validation.
+
+## Before You Change Code
+
+- Read the files that own the behavior before editing.
+- Check `git status --short` and do not overwrite unrelated user changes.
+- Keep changes scoped to the requested behavior.
+- Prefer standard library features and existing local helpers before adding dependencies.
+- Do not introduce package cycles.
+- Do not log secrets, Discord tokens, Seerr API keys, raw config payloads, or full request bodies.
 
 ## Commands
 
-Run these before handing off changes:
+Run these before handing off code changes:
 
 ```bash
 go test ./...
 go vet ./...
 ```
 
-If the default Go cache is not writable, use:
+If the default Go cache is not writable, use writable caches:
 
 ```bash
 GOCACHE=/tmp/augur-go-build GOMODCACHE=/tmp/augur-go-mod go test ./...
+GOCACHE=/tmp/augur-go-build GOMODCACHE=/tmp/augur-go-mod go vet ./...
+```
+
+For build-only checks:
+
+```bash
+CGO_ENABLED=0 go build ./cmd/augur
 ```
 
 ## Package Boundaries
 
 | Path | Owns | Avoid |
 | --- | --- | --- |
-| `cmd/augur` | Process startup, config loading, logging setup, and signal handling. | Business logic, Discord handlers, Seerr request details. |
-| `internal/app` | Runtime wiring, workflows, watch polling, shutdown coordination. | Discord-specific UI details, SQL statements, HTTP response parsing. |
-| `internal/config` | Config structs, defaults, environment overrides, validation. | Service startup or runtime side effects beyond environment reads. |
-| `internal/discordbot` | Discord session lifecycle, slash commands, interactions, DMs, presence, selection cache. | Seerr API details, storage details, cross-service orchestration. |
-| `internal/seer` | Seerr HTTP client, request/response models, API-specific errors. | Discord formatting, storage, polling loops. |
-| `internal/storage` | SQLite schema and persistence operations. | Network calls, Discord calls, application workflow decisions. |
+| `cmd/augur` | Process startup, flags, config loading, logging setup, signal handling, exit codes. | Business logic, Discord handlers, Seerr request details, SQL. |
+| `internal/app` | Runtime wiring, workflow decisions, request creation flow, watch polling, shutdown coordination. | Discord UI details, SQL statements, raw HTTP parsing. |
+| `internal/config` | Config structs, defaults, environment overrides, normalization, validation. | Service startup side effects beyond environment reads. |
+| `internal/discordbot` | Discord session lifecycle, slash commands, interactions, DMs, presence, selection cache, Discord message formatting. | Seerr API details, storage details, cross-service orchestration. |
+| `internal/seer` | Seerr HTTP client, request/response models, API validation, API-specific errors, availability status helpers. | Discord formatting, storage, polling loops. |
+| `internal/storage` | SQLite path handling, schema, pragmas, row scanning, persistence operations, timestamp serialization. | Network calls, Discord calls, application workflow decisions. |
+
+When a behavior spans packages, put the decision in `internal/app` and keep clients/storage as narrow adapters.
 
 ## File Organization
 
-Use focused files named after their responsibility. As a rule of thumb, reconsider a file once it grows beyond about 250 lines or starts needing unrelated sections.
+Use focused files named after their responsibility. Reconsider a file once it grows beyond about 250 lines, or sooner if it has unrelated sections.
 
-Current `internal/discordbot` layout:
+Current package layout:
 
-- `bot.go`: core types and constructor.
-- `lifecycle.go`: session start, close, ready handler, presence, outbound DMs.
-- `commands.go`: slash command definitions and command/component IDs.
-- `handlers.go`: interaction workflows for slash commands and components.
-- `responses.go`: common Discord interaction response helpers.
-- `format.go`: user-facing labels, truncation, interaction value extraction, link building.
-- `cache.go`: short-lived selection cache for request pickers.
+- `cmd/augur/main.go`: startup and process-level error handling.
+- `internal/app/runner.go`: app wiring and lifecycle.
+- `internal/app/interfaces.go`: app-facing interfaces for Seerr, storage, and notifications.
+- `internal/app/workflow.go`: request/search workflow decisions.
+- `internal/app/watcher.go`: watch polling, retry, completion, and notification flow.
+- `internal/app/health.go`: optional health, readiness, and JSON metrics server.
+- `internal/app/metrics.go`: runtime counters exposed through `/metrics`.
+- `internal/config/types.go`: config model.
+- `internal/config/load.go`: config loading, defaults, and normalization.
+- `internal/config/env.go`: environment overrides.
+- `internal/config/validate.go`: config validation helpers.
+- `internal/config/duration.go`: JSON duration parsing and formatting.
+- `internal/discordbot/bot.go`: core Discord bot type and constructor.
+- `internal/discordbot/lifecycle.go`: session start, close, ready handler, presence, outbound DMs.
+- `internal/discordbot/commands.go`: slash command definitions and command/component IDs.
+- `internal/discordbot/handlers.go`: Discord interaction workflows.
+- `internal/discordbot/responses.go`: Discord interaction response helpers.
+- `internal/discordbot/format.go`: labels, truncation, interaction value extraction, link building.
+- `internal/discordbot/cache.go`: short-lived selection cache for request pickers.
+- `internal/seer/client.go`: HTTP client, endpoint methods, request construction, response handling.
+- `internal/seer/status.go`: notification-setting matching and availability status interpretation.
+- `internal/storage/store.go`: store lifecycle, schema initialization, watch persistence methods.
+- `internal/storage/path.go`: storage path normalization and directory creation.
+- `internal/storage/scan.go`: SQL row scanning and scan-time parse errors.
+- `internal/storage/time.go`: timestamp formatting and parsing.
 
-When adding a feature, place the code where the responsibility lives. If a file needs a second unrelated concern, make a new file in the same package.
+If a file needs a second unrelated concern, make a new file in the same package.
+
+## Hardening Rules
+
+- Validate and normalize config at the edge before starting services.
+- Trim user-controlled string fields before validation or persistence.
+- Reject impossible IDs and unsupported media types before calling external systems.
+- Keep HTTP, Discord, and database operations context-aware.
+- Bound remote response bodies and error snippets.
+- Wrap errors with package-boundary context, but do not include secrets.
+- Keep network calls outside storage transactions.
+- Keep SQLite transactions short and single-purpose.
+- Make shutdown idempotent. Closing twice should be safe.
+- Prefer ephemeral Discord responses for user-specific or failure messages.
+- Set `AllowedMentions` on Discord messages unless mentions are intentionally needed.
+- Treat external API shapes as unstable: decode defensively and test edge cases.
 
 ## Maintainability Rules
 
-- Keep public APIs narrow. Export only what other packages need.
-- Keep handlers thin. Discord handlers should validate input, call the app workflow, then format the reply.
+- Keep public APIs narrow. Export only what another package needs.
+- Keep handlers thin. Validate input, call the app workflow, format the reply.
 - Keep workflow decisions in `internal/app`, not in clients or storage.
-- Keep clients context-aware. Any HTTP, Discord, or database operation should accept or be driven by a `context.Context`.
 - Keep storage methods small and transactional only where needed.
-- Avoid package cycles by depending inward on interfaces where useful.
-- Prefer standard library features and existing local helpers before adding dependencies.
-- Do not hide operational errors. Wrap errors with enough context at package boundaries.
-- Do not log secrets, Discord tokens, Seerr API keys, or full config payloads.
-- Do not make broad refactors while fixing narrow bugs unless the refactor directly reduces risk.
+- Use interfaces only when they reduce coupling or make tests cleaner.
+- Avoid broad refactors while fixing narrow bugs unless the refactor directly reduces risk.
+- Prefer table-driven tests for pure logic and validation.
+- Avoid clever abstractions for code that is already short and clear.
 
 ## Testing Expectations
 
-- Add table-driven tests for validation, parsing, formatting, and pure helper logic.
-- Add HTTP server tests for Seerr client behavior.
-- Add storage tests for schema changes, persistence behavior, and edge cases.
+- Add tests with behavior changes.
+- Add table-driven tests for validation, normalization, parsing, formatting, and pure helper logic.
+- Add HTTP transport or test-server tests for Seerr client behavior.
+- Add storage tests for schema changes, persistence behavior, validation, and edge cases.
 - For Discord handlers, prefer testing pure helpers and workflow-facing interfaces instead of live Discord calls.
-- Update tests with behavior changes. Do not only update snapshots or expected strings without checking the user-facing impact.
+- Include regression tests for bugs you fix.
+- Do not update expected strings blindly. Check the user-facing impact.
+
+## Config And Docs
+
+When changing config:
+
+- Update `config.example.json`.
+- Update `config.docker.json` when container defaults change.
+- Update `docs/configuration.md`.
+- Update Docker Compose or Unraid templates if environment variables or mounts change.
+- Keep environment variable names stable unless there is a clear migration reason.
 
 ## Style
 
 - Use `gofmt`.
+- Use clear names over abbreviations except common Go conventions like `ctx`, `cfg`, `db`, and `err`.
 - Keep comments useful and sparse. Explain why a decision exists, not what each line does.
-- Prefer descriptive names over abbreviations except for common Go conventions like `ctx`, `cfg`, and `err`.
-- Keep config keys and environment variables documented when adding them.
-- Keep Docker, Unraid, and example config files in sync with config changes.
+- Prefer explicit error messages that help operators fix config or runtime failures.
+- Keep Markdown plain and readable.
+
+## Handoff Checklist
+
+Before final response:
+
+- Run `gofmt` on touched Go files.
+- Run `go test ./...` and `go vet ./...`, using `/tmp` caches if needed.
+- Check `git status --short`.
+- Mention any commands that could not be run and why.
+- Summarize the behavioral impact, not every mechanical edit.

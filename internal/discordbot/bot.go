@@ -15,6 +15,11 @@ type Handler interface {
 	Request(ctx context.Context, discordID string, result seer.SearchResult) (seer.Request, error)
 }
 
+type interactionSession interface {
+	InteractionRespond(interaction *discordgo.Interaction, response *discordgo.InteractionResponse, options ...discordgo.RequestOption) error
+	InteractionResponseEdit(interaction *discordgo.Interaction, newresp *discordgo.WebhookEdit, options ...discordgo.RequestOption) (*discordgo.Message, error)
+}
+
 type Bot struct {
 	session *discordgo.Session
 	cfg     config.DiscordConfig

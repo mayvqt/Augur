@@ -81,6 +81,46 @@ func TestStoreUpsertDoesNotReopenCompletedWatch(t *testing.T) {
 	}
 }
 
+func TestOpenWatchFindsOnlyOpenWatch(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store, err := Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	if err := store.AddWatch(ctx, Watch{RequestID: 9, DiscordID: "123", Title: "Open", MediaType: "movie"}); err != nil {
+		t.Fatal(err)
+	}
+	watch, ok, err := store.OpenWatch(ctx, 9)
+	if err != nil || !ok {
+		t.Fatalf("OpenWatch ok = %v err = %v, want open watch", ok, err)
+	}
+	if watch.Title != "Open" {
+		t.Fatalf("watch title = %q, want Open", watch.Title)
+	}
+	if _, ok, err := store.CompleteWatch(ctx, 9, time.Now().UTC()); err != nil || !ok {
+		t.Fatalf("CompleteWatch ok = %v err = %v, want ok", ok, err)
+	}
+	if _, ok, err := store.OpenWatch(ctx, 9); err != nil || ok {
+		t.Fatalf("OpenWatch after complete ok = %v err = %v, want closed", ok, err)
+	}
+}
+
+func TestStorePing(t *testing.T) {
+	t.Parallel()
+	store, err := Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	if err := store.Ping(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestAddWatchValidatesRequiredFields(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

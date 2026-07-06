@@ -23,5 +23,9 @@
   },
   "worker": {
     "poll_interval": "2m"
+  },
+  "health": {
+    "enabled": false,
+    "address": "127.0.0.1:8080"
   }
 }

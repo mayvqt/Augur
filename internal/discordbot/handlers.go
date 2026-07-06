@@ -12,7 +12,7 @@ import (
 	"github.com/bwmarrin/discordgo"
 )
 
-func (b *Bot) handleCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
+func (b *Bot) handleCommand(s interactionSession, i *discordgo.InteractionCreate) {
 	switch i.ApplicationCommandData().Name {
 	case commandLink:
 		b.handleLink(s, i)
@@ -21,7 +21,7 @@ func (b *Bot) handleCommand(s *discordgo.Session, i *discordgo.InteractionCreate
 	}
 }
 
-func (b *Bot) handleLink(s *discordgo.Session, i *discordgo.InteractionCreate) {
+func (b *Bot) handleLink(s interactionSession, i *discordgo.InteractionCreate) {
 	userID := interactionUserID(i)
 	linkURL := b.linkURL(userID)
 	content := fmt.Sprintf("Open your Seerr Discord notification settings and paste your Discord ID64.\nDiscord ID64: `%s`\nURL: %s", userID, linkURL)
@@ -36,7 +36,7 @@ func (b *Bot) handleLink(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	b.respond(s, i, data)
 }
 
-func (b *Bot) handleRequest(s *discordgo.Session, i *discordgo.InteractionCreate) {
+func (b *Bot) handleRequest(s interactionSession, i *discordgo.InteractionCreate) {
 	query := strings.TrimSpace(optionString(i, "query"))
 	if query == "" {
 		b.ephemeral(s, i, "Type a title to search for.")
@@ -90,7 +90,7 @@ func (b *Bot) handleRequest(s *discordgo.Session, i *discordgo.InteractionCreate
 	}
 }
 
-func (b *Bot) handleComponent(s *discordgo.Session, i *discordgo.InteractionCreate) {
+func (b *Bot) handleComponent(s interactionSession, i *discordgo.InteractionCreate) {
 	data := i.MessageComponentData()
 	if !strings.HasPrefix(data.CustomID, componentPick) || len(data.Values) == 0 {
 		return

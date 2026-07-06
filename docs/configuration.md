@@ -18,6 +18,8 @@ Start from [config.example.json](../config.example.json).
 | `link.require_match` | Require a matching Seerr Discord notification ID before allowing `/request`. |
 | `storage.path` | SQLite database path. |
 | `worker.poll_interval` | How often Augur checks watched requests. |
+| `health.enabled` | Enable the optional HTTP health, readiness, and metrics server. |
+| `health.address` | Listen address for the optional health server. |
 
 ## Environment
 
@@ -34,6 +36,8 @@ Environment variables override matching file values:
 | `AUGUR_LINK_REQUIRE_MATCH` | `true` or `false`. |
 | `AUGUR_STORAGE_PATH` | SQLite database path. |
 | `AUGUR_WORKER_POLL_INTERVAL` | Duration such as `30s`, `2m`, or `5m`. |
+| `AUGUR_HEALTH_ENABLED` | `true` or `false`. |
+| `AUGUR_HEALTH_ADDRESS` | Listen address such as `127.0.0.1:8080` or `0.0.0.0:8080`. |
 
 ## Storage
 
@@ -50,3 +54,15 @@ Containers use:
 ```
 
 SQLite WAL sidecar files may appear beside the database while Augur is running.
+
+## Health And Metrics
+
+When `health.enabled` is true, Augur serves:
+
+| Path | Purpose |
+| --- | --- |
+| `/healthz` | Process liveness. |
+| `/readyz` | Storage-backed readiness. |
+| `/metrics` | JSON counters for searches, requests, watcher checks, completions, failures, and retries. |
+
+The Docker example listens on `0.0.0.0:8080` in the container and binds to `127.0.0.1:8080` on the host.
