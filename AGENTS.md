@@ -16,6 +16,7 @@ Keep the code boring, explicit, hardened, and easy to scan. Prefer small files w
 - Prefer standard library features and existing local helpers before adding dependencies.
 - Do not introduce package cycles.
 - Do not log secrets, Discord tokens, Seerr API keys, raw config payloads, or full request bodies.
+- Remove local build artifacts such as `./augur` before handoff.
 
 ## Commands
 
@@ -36,7 +37,7 @@ GOCACHE=/tmp/augur-go-build GOMODCACHE=/tmp/augur-go-mod go vet ./...
 For build-only checks:
 
 ```bash
-CGO_ENABLED=0 go build ./cmd/augur
+GOCACHE=/tmp/augur-go-build GOMODCACHE=/tmp/augur-go-mod CGO_ENABLED=0 go build ./cmd/augur
 ```
 
 ## Package Boundaries
@@ -61,9 +62,9 @@ Current package layout:
 - `cmd/augur/main.go`: startup and process-level error handling.
 - `internal/app/runner.go`: app wiring and lifecycle.
 - `internal/app/interfaces.go`: app-facing interfaces for Seerr, storage, and notifications.
-- `internal/app/workflow.go`: request/search workflow decisions.
+- `internal/app/requests.go`: request/search workflow decisions and duplicate-watch policy.
 - `internal/app/watcher.go`: watch polling, retry, completion, and notification flow.
-- `internal/app/health.go`: optional health, readiness, and JSON metrics server.
+- `internal/app/health_server.go`: optional health, readiness, and JSON metrics server.
 - `internal/app/metrics.go`: runtime counters exposed through `/metrics`.
 - `internal/config/types.go`: config model.
 - `internal/config/load.go`: config loading, defaults, and normalization.
@@ -86,6 +87,8 @@ Current package layout:
 
 If a file needs a second unrelated concern, make a new file in the same package.
 
+Prefer file names that describe the domain behavior, not the implementation technique. For example, use `requests.go`, `watcher.go`, or `health_server.go` over vague names like `logic.go`, `helpers.go`, or `manager.go`.
+
 ## Hardening Rules
 
 - Validate and normalize config at the edge before starting services.
@@ -97,9 +100,12 @@ If a file needs a second unrelated concern, make a new file in the same package.
 - Keep network calls outside storage transactions.
 - Keep SQLite transactions short and single-purpose.
 - Make shutdown idempotent. Closing twice should be safe.
+- Keep shutdown bounded. If a goroutine can block on external I/O, it must observe context cancellation or have a timeout.
 - Prefer ephemeral Discord responses for user-specific or failure messages.
 - Set `AllowedMentions` on Discord messages unless mentions are intentionally needed.
 - Treat external API shapes as unstable: decode defensively and test edge cases.
+- Keep health and metrics endpoints non-secret. Expose counters and readiness, not config values or request payloads.
+- Bind health endpoints narrowly by default. Use localhost for examples unless container networking requires `0.0.0.0`.
 
 ## Maintainability Rules
 
@@ -108,6 +114,8 @@ If a file needs a second unrelated concern, make a new file in the same package.
 - Keep workflow decisions in `internal/app`, not in clients or storage.
 - Keep storage methods small and transactional only where needed.
 - Use interfaces only when they reduce coupling or make tests cleaner.
+- Put app-owned interfaces in `internal/app`; do not export them unless another package truly needs them.
+- Keep metrics names stable once documented. Add new counters rather than renaming existing ones casually.
 - Avoid broad refactors while fixing narrow bugs unless the refactor directly reduces risk.
 - Prefer table-driven tests for pure logic and validation.
 - Avoid clever abstractions for code that is already short and clear.
@@ -118,6 +126,8 @@ If a file needs a second unrelated concern, make a new file in the same package.
 - Add table-driven tests for validation, normalization, parsing, formatting, and pure helper logic.
 - Add HTTP transport or test-server tests for Seerr client behavior.
 - Add storage tests for schema changes, persistence behavior, validation, and edge cases.
+- Add app workflow tests with fakes for Seerr, storage, and notifier behavior.
+- Add health handler tests when changing `/healthz`, `/readyz`, or `/metrics`.
 - For Discord handlers, prefer testing pure helpers and workflow-facing interfaces instead of live Discord calls.
 - Include regression tests for bugs you fix.
 - Do not update expected strings blindly. Check the user-facing impact.
@@ -131,6 +141,7 @@ When changing config:
 - Update `docs/configuration.md`.
 - Update Docker Compose or Unraid templates if environment variables or mounts change.
 - Keep environment variable names stable unless there is a clear migration reason.
+- Keep Docker defaults and bare-metal examples intentionally different when needed. Container health can listen on `0.0.0.0`, while local examples should prefer `127.0.0.1`.
 
 ## Style
 
@@ -146,6 +157,8 @@ Before final response:
 
 - Run `gofmt` on touched Go files.
 - Run `go test ./...` and `go vet ./...`, using `/tmp` caches if needed.
+- Run `CGO_ENABLED=0 go build ./cmd/augur` for runtime or packaging changes.
+- Remove generated binaries or temporary files created by verification.
 - Check `git status --short`.
 - Mention any commands that could not be run and why.
 - Summarize the behavioral impact, not every mechanical edit.
