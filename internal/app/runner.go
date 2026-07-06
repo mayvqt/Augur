@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -32,6 +33,10 @@ type Runner struct {
 }
 
 func New(cfg config.Config, logger *slog.Logger) (*Runner, error) {
+	cfg.Normalize()
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
 	store, err := storage.Open(cfg.Storage.Path)
 	if err != nil {
 		return nil, err
@@ -132,6 +137,13 @@ func (r *Runner) Search(ctx context.Context, query string) ([]seer.SearchResult,
 }
 
 func (r *Runner) Request(ctx context.Context, discordID string, result seer.SearchResult) (seer.Request, error) {
+	discordID = strings.TrimSpace(discordID)
+	if discordID == "" {
+		return seer.Request{}, errors.New("discord user ID is required")
+	}
+	if err := validateSearchResult(result); err != nil {
+		return seer.Request{}, err
+	}
 	var seerUserID int
 	if r.cfg.Link.RequireMatch {
 		user, ok, err := r.seer.FindUserByDiscordID(ctx, discordID)
@@ -211,4 +223,16 @@ func displayTitle(result seer.SearchResult) string {
 		return result.Name
 	}
 	return fmt.Sprintf("%s %d", result.MediaType, result.ID)
+}
+
+func validateSearchResult(result seer.SearchResult) error {
+	if result.ID <= 0 {
+		return errors.New("selected media is missing an ID")
+	}
+	switch result.MediaType {
+	case "movie", "tv":
+		return nil
+	default:
+		return fmt.Errorf("unsupported media type %q", result.MediaType)
+	}
 }

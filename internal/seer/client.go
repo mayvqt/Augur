@@ -14,7 +14,10 @@ import (
 	"time"
 )
 
-const maxResponseBodyBytes = 1 << 20
+const (
+	maxResponseBodyBytes = 1 << 20
+	maxErrorBodyBytes    = 2048
+)
 
 type Client struct {
 	baseURL    string
@@ -117,6 +120,12 @@ func (c *Client) FindUserByDiscordID(ctx context.Context, discordID string) (Use
 }
 
 func (c *Client) RequestMedia(ctx context.Context, userID int, mediaType string, mediaID int) (Request, error) {
+	if mediaID <= 0 {
+		return Request{}, errors.New("media ID must be positive")
+	}
+	if mediaType != "movie" && mediaType != "tv" {
+		return Request{}, fmt.Errorf("unsupported media type %q", mediaType)
+	}
 	body := map[string]any{
 		"mediaType": mediaType,
 		"mediaId":   mediaID,
@@ -162,12 +171,15 @@ func (c *Client) do(ctx context.Context, method, path string, body any, out any)
 		return err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("seerr %s %s returned %d: %s", method, path, resp.StatusCode, strings.TrimSpace(string(data)))
+		return fmt.Errorf("seerr %s %s returned %d: %s", method, path, resp.StatusCode, responseSnippet(data))
 	}
 	if out == nil || len(data) == 0 {
 		return nil
 	}
-	return json.Unmarshal(data, out)
+	if err := json.Unmarshal(data, out); err != nil {
+		return fmt.Errorf("decode seerr %s %s response: %w", method, path, err)
+	}
+	return nil
 }
 
 func (c *Client) newRequest(ctx context.Context, method, path string, body any) (*http.Request, error) {
@@ -203,35 +215,10 @@ func readResponseBody(body io.Reader) ([]byte, error) {
 	return data, nil
 }
 
-func (s NotificationSettings) HasDiscordID(discordID string) bool {
-	for _, candidate := range s.DiscordIDs {
-		if strings.TrimSpace(candidate) == discordID {
-			return true
-		}
+func responseSnippet(data []byte) string {
+	text := strings.TrimSpace(string(data))
+	if len(text) <= maxErrorBodyBytes {
+		return text
 	}
-	return false
-}
-
-func IsAvailable(req Request) bool {
-	if req.Media != nil && mediaAvailable(req.Media.Status) {
-		return true
-	}
-	if req.MediaInfo != nil && mediaAvailable(req.MediaInfo.Status) {
-		return true
-	}
-	return false
-}
-
-func mediaAvailable(status any) bool {
-	switch v := status.(type) {
-	case string:
-		normalized := strings.ToLower(strings.ReplaceAll(v, "_", ""))
-		return normalized == "available" || normalized == "partiallyavailable"
-	case float64:
-		return int(v) == 5
-	case int:
-		return v == 5
-	default:
-		return false
-	}
+	return text[:maxErrorBodyBytes] + "..."
 }

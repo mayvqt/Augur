@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -101,6 +102,7 @@ func Load(path string) (Config, error) {
 	if err := applyEnvironment(&cfg); err != nil {
 		return cfg, err
 	}
+	cfg.Normalize()
 	return cfg, cfg.Validate()
 }
 
@@ -121,6 +123,18 @@ func defaults() Config {
 		Storage: StorageConfig{Path: "augur-state.db"},
 		Worker:  WorkerConfig{PollInterval: Duration(2 * time.Minute)},
 	}
+}
+
+func (c *Config) Normalize() {
+	c.Discord.Token = strings.TrimSpace(c.Discord.Token)
+	c.Discord.GuildID = strings.TrimSpace(c.Discord.GuildID)
+	c.Discord.Presence.Status = strings.ToLower(strings.TrimSpace(c.Discord.Presence.Status))
+	c.Discord.Presence.Type = strings.ToLower(strings.TrimSpace(c.Discord.Presence.Type))
+	c.Discord.Presence.Message = strings.TrimSpace(c.Discord.Presence.Message)
+	c.Seer.BaseURL = strings.TrimRight(strings.TrimSpace(c.Seer.BaseURL), "/")
+	c.Seer.APIKey = strings.TrimSpace(c.Seer.APIKey)
+	c.Link.PublicURL = strings.TrimRight(strings.TrimSpace(c.Link.PublicURL), "/")
+	c.Storage.Path = strings.TrimSpace(c.Storage.Path)
 }
 
 func applyEnvironment(cfg *Config) error {
@@ -179,6 +193,9 @@ func (c Config) Validate() error {
 	if c.Seer.BaseURL == "" {
 		return errors.New("seer.base_url is required")
 	}
+	if !isHTTPURL(c.Seer.BaseURL) {
+		return errors.New("seer.base_url must be an absolute http or https URL")
+	}
 	if c.Seer.APIKey == "" {
 		return errors.New("seer.api_key is required")
 	}
@@ -188,6 +205,9 @@ func (c Config) Validate() error {
 	if c.Link.PublicURL == "" {
 		return errors.New("link.public_url is required; set it to the public Seerr URL")
 	}
+	if !isHTTPURL(c.Link.PublicURL) {
+		return errors.New("link.public_url must be an absolute http or https URL")
+	}
 	if c.Storage.Path == "" {
 		return errors.New("storage.path is required")
 	}
@@ -195,6 +215,14 @@ func (c Config) Validate() error {
 		return errors.New("worker.poll_interval must be positive")
 	}
 	return nil
+}
+
+func isHTTPURL(value string) bool {
+	parsed, err := url.Parse(value)
+	if err != nil {
+		return false
+	}
+	return parsed.Host != "" && (parsed.Scheme == "http" || parsed.Scheme == "https")
 }
 
 func oneOf(value string, allowed ...string) bool {

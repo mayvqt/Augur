@@ -100,6 +100,60 @@ func TestRequestMediaUsesSeerrUserIDAndAllSeasons(t *testing.T) {
 	}
 }
 
+func TestRequestMediaValidatesInputBeforeHTTP(t *testing.T) {
+	t.Parallel()
+	client := New(Config{BaseURL: "http://seerr.test", APIKey: "key", Timeout: time.Second})
+	client.httpClient = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		t.Fatalf("unexpected HTTP request to %s", r.URL.String())
+		return nil, nil
+	})}
+
+	if _, err := client.RequestMedia(context.Background(), 0, "music", 123); err == nil {
+		t.Fatal("RequestMedia accepted unsupported media type")
+	}
+	if _, err := client.RequestMedia(context.Background(), 0, "movie", 0); err == nil {
+		t.Fatal("RequestMedia accepted missing media ID")
+	}
+}
+
+func TestDoWrapsInvalidJSONWithEndpoint(t *testing.T) {
+	t.Parallel()
+	client := New(Config{BaseURL: "http://seerr.test", APIKey: "key", Timeout: time.Second})
+	client.httpClient = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: 200,
+			Body:       io.NopCloser(strings.NewReader("{")),
+		}, nil
+	})}
+
+	err := client.do(context.Background(), http.MethodGet, "/api/v1/request/1", nil, &Request{})
+	if err == nil || !strings.Contains(err.Error(), "decode seerr GET /api/v1/request/1 response") {
+		t.Fatalf("err = %v, want endpoint decode context", err)
+	}
+}
+
+func TestDoLimitsErrorResponseSnippet(t *testing.T) {
+	t.Parallel()
+	client := New(Config{BaseURL: "http://seerr.test", APIKey: "key", Timeout: time.Second})
+	client.httpClient = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: 500,
+			Body:       io.NopCloser(strings.NewReader(strings.Repeat("x", maxErrorBodyBytes+100))),
+		}, nil
+	})}
+
+	err := client.do(context.Background(), http.MethodGet, "/api/v1/request/1", nil, &Request{})
+	if err == nil {
+		t.Fatal("expected HTTP error")
+	}
+	if len(err.Error()) > maxErrorBodyBytes+128 {
+		t.Fatalf("error length = %d, want bounded snippet", len(err.Error()))
+	}
+	if !strings.HasSuffix(err.Error(), "...") {
+		t.Fatalf("err = %q, want ellipsis suffix", err.Error())
+	}
+}
+
 func TestDoRejectsOversizedResponses(t *testing.T) {
 	t.Parallel()
 	client := New(Config{BaseURL: "http://seerr.test", APIKey: "key", Timeout: time.Second})

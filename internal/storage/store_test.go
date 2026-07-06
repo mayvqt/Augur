@@ -81,6 +81,57 @@ func TestStoreUpsertDoesNotReopenCompletedWatch(t *testing.T) {
 	}
 }
 
+func TestAddWatchValidatesRequiredFields(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store, err := Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	tests := []struct {
+		name  string
+		watch Watch
+	}{
+		{name: "request id", watch: Watch{DiscordID: "123", Title: "Title", MediaType: "movie"}},
+		{name: "discord id", watch: Watch{RequestID: 1, Title: "Title", MediaType: "movie"}},
+		{name: "title", watch: Watch{RequestID: 1, DiscordID: "123", MediaType: "movie"}},
+		{name: "media type", watch: Watch{RequestID: 1, DiscordID: "123", Title: "Title", MediaType: "music"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := store.AddWatch(ctx, tt.watch); err == nil {
+				t.Fatal("AddWatch accepted invalid watch")
+			}
+		})
+	}
+}
+
+func TestAddWatchTrimsStoredFields(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store, err := Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	if err := store.AddWatch(ctx, Watch{RequestID: 8, DiscordID: " 123 ", Title: " Title ", MediaType: " movie "}); err != nil {
+		t.Fatal(err)
+	}
+	watches, err := store.OpenWatches(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(watches) != 1 {
+		t.Fatalf("open watches = %d, want 1", len(watches))
+	}
+	if watches[0].DiscordID != "123" || watches[0].Title != "Title" || watches[0].MediaType != "movie" {
+		t.Fatalf("watch fields were not trimmed: %#v", watches[0])
+	}
+}
+
 func TestStoreUsesRecoverableSQLiteSettings(t *testing.T) {
 	t.Parallel()
 	store, err := Open(filepath.Join(t.TempDir(), "state.db"))
