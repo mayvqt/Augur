@@ -13,6 +13,10 @@ import (
 
 func (r *Runner) Search(ctx context.Context, query string) ([]seer.SearchResult, error) {
 	r.metrics.searches.Add(1)
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return nil, errors.New("search query is required")
+	}
 	return r.seer.Search(ctx, query)
 }
 

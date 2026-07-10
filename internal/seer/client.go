@@ -25,6 +25,31 @@ type Client struct {
 	httpClient *http.Client
 }
 
+type responseError struct {
+	method     string
+	path       string
+	statusCode int
+	snippet    string
+}
+
+func (e *responseError) Error() string {
+	return fmt.Sprintf("seerr %s %s returned %d: %s", e.method, e.path, e.statusCode, e.snippet)
+}
+
+// IsRetryable reports whether another attempt may recover from a Seerr error.
+func IsRetryable(err error) bool {
+	if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	var responseErr *responseError
+	if !errors.As(err, &responseErr) {
+		return true
+	}
+	return responseErr.statusCode == http.StatusRequestTimeout ||
+		responseErr.statusCode == http.StatusTooManyRequests ||
+		responseErr.statusCode >= http.StatusInternalServerError
+}
+
 type Config struct {
 	BaseURL string
 	APIKey  string
@@ -68,6 +93,10 @@ func New(cfg Config) *Client {
 }
 
 func (c *Client) Search(ctx context.Context, query string) ([]SearchResult, error) {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return nil, errors.New("search query is required")
+	}
 	values := url.Values{}
 	values.Set("query", query)
 	values.Set("page", "1")
@@ -90,6 +119,10 @@ func (c *Client) Search(ctx context.Context, query string) ([]SearchResult, erro
 }
 
 func (c *Client) FindUserByDiscordID(ctx context.Context, discordID string) (User, bool, error) {
+	discordID = strings.TrimSpace(discordID)
+	if discordID == "" {
+		return User{}, false, errors.New("discord ID is required")
+	}
 	for skip := 0; skip < 2000; skip += 100 {
 		values := url.Values{}
 		values.Set("take", "100")
@@ -145,12 +178,18 @@ func (c *Client) RequestMedia(ctx context.Context, userID int, mediaType string,
 }
 
 func (c *Client) Request(ctx context.Context, id int) (Request, error) {
+	if id <= 0 {
+		return Request{}, errors.New("request ID must be positive")
+	}
 	var out Request
 	err := c.do(ctx, http.MethodGet, "/api/v1/request/"+strconv.Itoa(id), nil, &out)
 	return out, err
 }
 
 func (c *Client) NotificationSettings(ctx context.Context, userID int) (NotificationSettings, error) {
+	if userID <= 0 {
+		return NotificationSettings{}, errors.New("user ID must be positive")
+	}
 	var out NotificationSettings
 	err := c.do(ctx, http.MethodGet, "/api/v1/user/"+strconv.Itoa(userID)+"/settings/notifications", nil, &out)
 	return out, err
@@ -171,7 +210,7 @@ func (c *Client) do(ctx context.Context, method, path string, body any, out any)
 		return err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("seerr %s %s returned %d: %s", method, path, resp.StatusCode, responseSnippet(data))
+		return &responseError{method: method, path: path, statusCode: resp.StatusCode, snippet: responseSnippet(data)}
 	}
 	if out == nil || len(data) == 0 {
 		return nil

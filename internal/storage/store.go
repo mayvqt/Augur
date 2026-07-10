@@ -143,6 +143,13 @@ func (s *Store) CompleteWatch(ctx context.Context, requestID int, completedAt ti
 	if err := ctx.Err(); err != nil {
 		return Watch{}, false, err
 	}
+	if requestID <= 0 {
+		return Watch{}, false, errors.New("request_id must be positive")
+	}
+	completedAt = completedAt.UTC()
+	if completedAt.IsZero() {
+		completedAt = time.Now().UTC()
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return Watch{}, false, fmt.Errorf("begin complete watch: %w", err)
@@ -154,10 +161,6 @@ func (s *Store) CompleteWatch(ctx context.Context, requestID int, completedAt ti
 	watch, ok, err := selectOpenWatch(ctx, tx, requestID)
 	if err != nil || !ok {
 		return Watch{}, ok, err
-	}
-	completedAt = completedAt.UTC()
-	if completedAt.IsZero() {
-		completedAt = time.Now().UTC()
 	}
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE watches

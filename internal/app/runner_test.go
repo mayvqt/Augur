@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -13,6 +14,43 @@ import (
 	"github.com/mayvqt/Augur/internal/seer"
 	"github.com/mayvqt/Augur/internal/storage"
 )
+
+func TestRunnerSearchNormalizesAndValidatesQuery(t *testing.T) {
+	t.Parallel()
+	seerClient := &fakeSeer{}
+	runner := newTestRunner(testConfig(), seerClient, &fakeStore{}, &fakeNotifier{})
+
+	if _, err := runner.Search(context.Background(), "   "); err == nil {
+		t.Fatal("Search() accepted a blank query")
+	}
+	if seerClient.searchCalls != 0 {
+		t.Fatalf("search calls = %d, want 0", seerClient.searchCalls)
+	}
+	if _, err := runner.Search(context.Background(), "  arrival  "); err != nil {
+		t.Fatal(err)
+	}
+	if seerClient.searchQuery != "arrival" {
+		t.Fatalf("search query = %q, want arrival", seerClient.searchQuery)
+	}
+}
+
+func TestRequestWithRetryStopsOnCancellation(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(context.Background())
+	seerClient := &fakeSeer{requestErr: context.Canceled, requestHook: cancel}
+	runner := newTestRunner(testConfig(), seerClient, &fakeStore{}, &fakeNotifier{})
+
+	_, err := runner.requestWithRetry(ctx, 1)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("requestWithRetry() error = %v, want context canceled", err)
+	}
+	if seerClient.requestCalls != 1 {
+		t.Fatalf("request calls = %d, want 1", seerClient.requestCalls)
+	}
+	if got := runner.metrics.Snapshot()["transient_seer_failures"]; got != 0 {
+		t.Fatalf("transient failures = %d, want 0", got)
+	}
+}
 
 func TestValidateSearchResult(t *testing.T) {
 	t.Parallel()

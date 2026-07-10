@@ -30,8 +30,14 @@ func (r *Runner) checkWatches(ctx context.Context) {
 		return
 	}
 	for _, watch := range watches {
+		if ctx.Err() != nil {
+			return
+		}
 		req, err := r.requestWithRetry(ctx, watch.RequestID)
 		if err != nil {
+			if ctx.Err() != nil {
+				return
+			}
 			r.metrics.watcherFailures.Add(1)
 			r.logger.Error("check request", "request_id", watch.RequestID, "error", err)
 			continue
@@ -62,7 +68,13 @@ func (r *Runner) requestWithRetry(ctx context.Context, requestID int) (seer.Requ
 		if err == nil {
 			return req, nil
 		}
+		if ctx.Err() != nil {
+			return seer.Request{}, ctx.Err()
+		}
 		lastErr = err
+		if !seer.IsRetryable(err) {
+			break
+		}
 		r.metrics.transientSeerFailures.Add(1)
 		if attempt == 2 {
 			break

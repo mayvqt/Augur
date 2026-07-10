@@ -148,6 +148,19 @@ func TestAddWatchValidatesRequiredFields(t *testing.T) {
 	}
 }
 
+func TestCompleteWatchValidatesRequestID(t *testing.T) {
+	t.Parallel()
+	store, err := Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	if _, _, err := store.CompleteWatch(context.Background(), 0, time.Time{}); err == nil {
+		t.Fatal("CompleteWatch accepted a non-positive request ID")
+	}
+}
+
 func TestAddWatchTrimsStoredFields(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

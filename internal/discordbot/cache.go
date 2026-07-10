@@ -36,6 +36,9 @@ func (c *selectionCache) get(cacheID, key string) (seer.SearchResult, bool) {
 	c.initLocked()
 	item, ok := c.items[cacheKey(cacheID, key)]
 	if !ok || time.Now().After(item.expiresAt) {
+		if ok {
+			delete(c.items, cacheKey(cacheID, key))
+		}
 		return seer.SearchResult{}, false
 	}
 	return item.result, true

@@ -44,12 +44,19 @@ type fakeSeer struct {
 	createdRequest  seer.Request
 	requestByID     map[int]seer.Request
 	requestFailures int
+	requestErr      error
+	requestHook     func()
+	requestCalls    int
+	searchCalls     int
+	searchQuery     string
 }
 
 func (f *fakeSeer) Search(ctx context.Context, query string) ([]seer.SearchResult, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	f.searchCalls++
+	f.searchQuery = query
 	return f.searchResults, nil
 }
 
@@ -68,6 +75,13 @@ func (f *fakeSeer) RequestMedia(ctx context.Context, userID int, mediaType strin
 }
 
 func (f *fakeSeer) Request(ctx context.Context, id int) (seer.Request, error) {
+	f.requestCalls++
+	if f.requestHook != nil {
+		f.requestHook()
+	}
+	if f.requestErr != nil {
+		return seer.Request{}, f.requestErr
+	}
 	if err := ctx.Err(); err != nil {
 		return seer.Request{}, err
 	}

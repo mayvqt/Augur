@@ -116,6 +116,28 @@ func TestRequestMediaValidatesInputBeforeHTTP(t *testing.T) {
 	}
 }
 
+func TestClientMethodsValidateIdentifiersBeforeHTTP(t *testing.T) {
+	t.Parallel()
+	client := New(Config{BaseURL: "http://seerr.test", APIKey: "key", Timeout: time.Second})
+	client.httpClient = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		t.Fatalf("unexpected HTTP request to %s", r.URL.String())
+		return nil, nil
+	})}
+
+	if _, err := client.Search(context.Background(), "  "); err == nil {
+		t.Fatal("Search accepted a blank query")
+	}
+	if _, _, err := client.FindUserByDiscordID(context.Background(), "  "); err == nil {
+		t.Fatal("FindUserByDiscordID accepted a blank ID")
+	}
+	if _, err := client.Request(context.Background(), 0); err == nil {
+		t.Fatal("Request accepted a non-positive ID")
+	}
+	if _, err := client.NotificationSettings(context.Background(), -1); err == nil {
+		t.Fatal("NotificationSettings accepted a non-positive ID")
+	}
+}
+
 func TestDoWrapsInvalidJSONWithEndpoint(t *testing.T) {
 	t.Parallel()
 	client := New(Config{BaseURL: "http://seerr.test", APIKey: "key", Timeout: time.Second})
@@ -151,6 +173,31 @@ func TestDoLimitsErrorResponseSnippet(t *testing.T) {
 	}
 	if !strings.HasSuffix(err.Error(), "...") {
 		t.Fatalf("err = %q, want ellipsis suffix", err.Error())
+	}
+}
+
+func TestIsRetryable(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "network error", err: io.ErrUnexpectedEOF, want: true},
+		{name: "rate limited", err: &responseError{statusCode: http.StatusTooManyRequests}, want: true},
+		{name: "server error", err: &responseError{statusCode: http.StatusBadGateway}, want: true},
+		{name: "client error", err: &responseError{statusCode: http.StatusNotFound}, want: false},
+		{name: "canceled", err: context.Canceled, want: false},
+		{name: "deadline", err: context.DeadlineExceeded, want: false},
+		{name: "nil", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := IsRetryable(tt.err); got != tt.want {
+				t.Fatalf("IsRetryable() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 
