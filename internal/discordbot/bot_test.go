@@ -76,6 +76,36 @@ func TestSearchOptionUsesTitleAndYear(t *testing.T) {
 	}
 }
 
+func TestBrowsablePreviewKeepsSearchResults(t *testing.T) {
+	t.Parallel()
+	bot := &Bot{}
+	bot.cache.setMany("search", "user", map[string]seer.SearchResult{
+		"0": {Title: "Alien", ReleaseDate: "1979-05-25"},
+		"1": {Title: "Aliens", ReleaseDate: "1986-07-18"},
+	})
+
+	components := bot.browsableComponents(
+		"search",
+		"1",
+		"user",
+		previewComponents("search", "1"),
+	)
+
+	if len(components) != 2 {
+		t.Fatalf("component rows = %d, want picker and request buttons", len(components))
+	}
+	menu := components[0].(discordgo.ActionsRow).Components[0].(discordgo.SelectMenu)
+	if len(menu.Options) != 2 {
+		t.Fatalf("picker options = %d, want 2", len(menu.Options))
+	}
+	if menu.Options[0].Label != "Alien (1979)" || menu.Options[0].Default {
+		t.Fatalf("first option = %#v", menu.Options[0])
+	}
+	if menu.Options[1].Label != "Aliens (1986)" || !menu.Options[1].Default {
+		t.Fatalf("selected option = %#v", menu.Options[1])
+	}
+}
+
 func TestQuotaLabelIncludesUsageAndLimits(t *testing.T) {
 	t.Parallel()
 	quota := &seer.Quota{

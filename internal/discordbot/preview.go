@@ -61,6 +61,43 @@ func previewComponents(cacheID, key string) []discordgo.MessageComponent {
 	}}}
 }
 
+func (b *Bot) browsableComponents(
+	cacheID string,
+	selectedKey string,
+	ownerID string,
+	components []discordgo.MessageComponent,
+) []discordgo.MessageComponent {
+	cachedOptions := b.cache.options(cacheID, ownerID)
+	if len(cachedOptions) == 0 {
+		return components
+	}
+
+	options := make([]discordgo.SelectMenuOption, 0, len(cachedOptions))
+	for _, option := range cachedOptions {
+		options = append(options, discordgo.SelectMenuOption{
+			Label:   truncate(optionLabel(option.result), 100),
+			Value:   option.key,
+			Default: option.key == selectedKey,
+		})
+	}
+	return append(
+		[]discordgo.MessageComponent{resultPickerRow(cacheID, "Choose another title", options)},
+		components...,
+	)
+}
+
+func resultPickerRow(cacheID, placeholder string, options []discordgo.SelectMenuOption) discordgo.ActionsRow {
+	return discordgo.ActionsRow{Components: []discordgo.MessageComponent{
+		discordgo.SelectMenu{
+			CustomID:    componentPick + cacheID,
+			Placeholder: placeholder,
+			MinValues:   intPtr(1),
+			MaxValues:   1,
+			Options:     options,
+		},
+	}}
+}
+
 func seasonPickerComponents(cacheID, key string, seasons []seer.Season, quota *seer.Quota) []discordgo.MessageComponent {
 	maxSelections := len(seasons)
 	if quota != nil && quota.TV.Restricted && quota.TV.Remaining < maxSelections {

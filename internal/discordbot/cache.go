@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -22,6 +23,11 @@ type cachedSelection struct {
 	quota     *seer.Quota
 	ownerID   string
 	expiresAt time.Time
+}
+
+type cachedResultOption struct {
+	key    string
+	result seer.SearchResult
 }
 
 func (c *selectionCache) setMany(cacheID, ownerID string, results map[string]seer.SearchResult) {
@@ -47,6 +53,30 @@ func (c *selectionCache) get(cacheID, key, ownerID string) (seer.SearchResult, b
 		return seer.SearchResult{}, false
 	}
 	return item.result, true
+}
+
+func (c *selectionCache) options(cacheID, ownerID string) []cachedResultOption {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.initLocked()
+
+	now := time.Now()
+	options := make([]cachedResultOption, 0, 25)
+	for index := 0; index < 25; index++ {
+		key := strconv.Itoa(index)
+		item, ok := c.items[cacheKey(cacheID, key)]
+		if !ok {
+			continue
+		}
+		if item.ownerID != ownerID || !now.Before(item.expiresAt) {
+			if item.ownerID == ownerID {
+				delete(c.items, cacheKey(cacheID, key))
+			}
+			continue
+		}
+		options = append(options, cachedResultOption{key: key, result: item.result})
+	}
+	return options
 }
 
 func (c *selectionCache) setQuota(cacheID, key, ownerID string, quota *seer.Quota) bool {
