@@ -71,17 +71,14 @@ func TestSearchOptionUsesTitleAndYear(t *testing.T) {
 	if got := optionLabel(result); got != "The Thing (1982)" {
 		t.Fatalf("optionLabel() = %q", got)
 	}
-	if got := requestSummary(result); got != "Movie • 1982 • EN • ★ 8.1 • Processing" {
-		t.Fatalf("requestSummary() = %q", got)
-	}
 }
 
 func TestBrowsablePreviewKeepsSearchResults(t *testing.T) {
 	t.Parallel()
 	bot := &Bot{}
-	bot.cache.setMany("search", "user", map[string]seer.SearchResult{
-		"0": {Title: "Alien", ReleaseDate: "1979-05-25"},
-		"1": {Title: "Aliens", ReleaseDate: "1986-07-18"},
+	bot.cache.set("search", "user", []seer.SearchResult{
+		{Title: "Alien", ReleaseDate: "1979-05-25"},
+		{Title: "Aliens", ReleaseDate: "1986-07-18"},
 	})
 
 	components := bot.browsableComponents(
@@ -164,6 +161,24 @@ func TestParseSeasonValuesSortsAndDeduplicates(t *testing.T) {
 	}
 	if len(selection.Numbers) != 2 || selection.Numbers[0] != 1 || selection.Numbers[1] != 3 {
 		t.Fatalf("selection = %#v, want seasons 1 and 3", selection)
+	}
+}
+
+func TestComponentSelection(t *testing.T) {
+	t.Parallel()
+	cacheID, key, ok := componentSelection(componentConfirm+"search:2", componentConfirm)
+	if !ok || cacheID != "search" || key != "2" {
+		t.Fatalf("componentSelection() = %q, %q, %t", cacheID, key, ok)
+	}
+	for _, customID := range []string{
+		"wrong:search:2",
+		componentConfirm + "search",
+		componentConfirm + ":2",
+		componentConfirm + "search:",
+	} {
+		if _, _, ok := componentSelection(customID, componentConfirm); ok {
+			t.Fatalf("componentSelection(%q) accepted an invalid ID", customID)
+		}
 	}
 }
 

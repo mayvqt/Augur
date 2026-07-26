@@ -73,25 +73,6 @@ func mediaTypeLabel(mediaType string) string {
 	}
 }
 
-func requestSummary(result seer.SearchResult) string {
-	parts := []string{mediaTypeLabel(result.MediaType)}
-	if year := releaseYear(result); year != "" {
-		parts = append(parts, year)
-	}
-	if language := strings.ToUpper(strings.TrimSpace(result.OriginalLanguage)); language != "" {
-		parts = append(parts, language)
-	}
-	if rating := result.VoteAverage; rating > 0 && rating <= 10 && !math.IsNaN(rating) && !math.IsInf(rating, 0) {
-		parts = append(parts, fmt.Sprintf("★ %.1f", rating))
-	}
-	if result.MediaInfo != nil {
-		if availability := seer.AvailabilityLabel(result.MediaInfo.Status); availability != "" {
-			parts = append(parts, availability)
-		}
-	}
-	return strings.Join(parts, " • ")
-}
-
 func normalizeInlineText(value string) string {
 	return strings.Join(strings.Fields(value), " ")
 }

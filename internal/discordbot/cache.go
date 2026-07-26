@@ -5,24 +5,30 @@ import (
 	"encoding/hex"
 	"fmt"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/mayvqt/Augur/internal/seer"
 )
 
+const selectionTTL = 15 * time.Minute
+
 type selectionCache struct {
-	mu    sync.Mutex
-	items map[string]cachedSelection
+	mu       sync.Mutex
+	searches map[string]*cachedSearch
+}
+
+type cachedSearch struct {
+	ownerID    string
+	expiresAt  time.Time
+	results    []cachedSelection
+	quota      *seer.Quota
+	quotaKnown bool
 }
 
 type cachedSelection struct {
-	result    seer.SearchResult
-	seasons   seer.SeasonSelection
-	quota     *seer.Quota
-	ownerID   string
-	expiresAt time.Time
+	result  seer.SearchResult
+	seasons seer.SeasonSelection
 }
 
 type cachedResultOption struct {
@@ -30,13 +36,19 @@ type cachedResultOption struct {
 	result seer.SearchResult
 }
 
-func (c *selectionCache) setMany(cacheID, ownerID string, results map[string]seer.SearchResult) {
+func (c *selectionCache) set(cacheID, ownerID string, results []seer.SearchResult) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.initLocked()
-	expiresAt := time.Now().Add(15 * time.Minute)
-	for key, result := range results {
-		c.items[cacheKey(cacheID, key)] = cachedSelection{result: result, ownerID: ownerID, expiresAt: expiresAt}
+
+	selections := make([]cachedSelection, len(results))
+	for index, result := range results {
+		selections[index].result = result
+	}
+	c.searches[cacheID] = &cachedSearch{
+		ownerID:   ownerID,
+		expiresAt: time.Now().Add(selectionTTL),
+		results:   selections,
 	}
 	c.pruneLocked()
 }
@@ -44,136 +56,144 @@ func (c *selectionCache) setMany(cacheID, ownerID string, results map[string]see
 func (c *selectionCache) get(cacheID, key, ownerID string) (seer.SearchResult, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.initLocked()
-	item, ok := c.items[cacheKey(cacheID, key)]
-	if !ok || item.ownerID != ownerID || !time.Now().Before(item.expiresAt) {
-		if ok && item.ownerID == ownerID {
-			delete(c.items, cacheKey(cacheID, key))
-		}
+
+	selection, ok := c.selectionLocked(cacheID, key, ownerID)
+	if !ok {
 		return seer.SearchResult{}, false
 	}
-	return item.result, true
+	return selection.result, true
 }
 
 func (c *selectionCache) options(cacheID, ownerID string) []cachedResultOption {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.initLocked()
 
-	now := time.Now()
-	options := make([]cachedResultOption, 0, 25)
-	for index := 0; index < 25; index++ {
-		key := strconv.Itoa(index)
-		item, ok := c.items[cacheKey(cacheID, key)]
-		if !ok {
-			continue
+	search, ok := c.searchLocked(cacheID, ownerID)
+	if !ok {
+		return nil
+	}
+	options := make([]cachedResultOption, len(search.results))
+	for index, selection := range search.results {
+		options[index] = cachedResultOption{
+			key:    strconv.Itoa(index),
+			result: selection.result,
 		}
-		if item.ownerID != ownerID || !now.Before(item.expiresAt) {
-			if item.ownerID == ownerID {
-				delete(c.items, cacheKey(cacheID, key))
-			}
-			continue
-		}
-		options = append(options, cachedResultOption{key: key, result: item.result})
 	}
 	return options
 }
 
-func (c *selectionCache) setQuota(cacheID, key, ownerID string, quota *seer.Quota) bool {
+func (c *selectionCache) setQuota(cacheID, ownerID string, quota *seer.Quota) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.initLocked()
-	itemKey := cacheKey(cacheID, key)
-	item, ok := c.items[itemKey]
-	if !ok || item.ownerID != ownerID || !time.Now().Before(item.expiresAt) {
+
+	search, ok := c.searchLocked(cacheID, ownerID)
+	if !ok {
 		return false
 	}
 	if quota == nil {
-		item.quota = nil
+		search.quota = nil
 	} else {
 		quotaCopy := *quota
-		item.quota = &quotaCopy
+		search.quota = &quotaCopy
 	}
-	c.items[itemKey] = item
+	search.quotaKnown = true
 	return true
 }
 
-func (c *selectionCache) getQuota(cacheID, key, ownerID string) (*seer.Quota, bool) {
+func (c *selectionCache) getQuota(cacheID, ownerID string) (*seer.Quota, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.initLocked()
-	item, ok := c.items[cacheKey(cacheID, key)]
-	if !ok || item.ownerID != ownerID || !time.Now().Before(item.expiresAt) {
+
+	search, ok := c.searchLocked(cacheID, ownerID)
+	if !ok || !search.quotaKnown {
 		return nil, false
 	}
-	if item.quota == nil {
+	if search.quota == nil {
 		return nil, true
 	}
-	quotaCopy := *item.quota
+	quotaCopy := *search.quota
 	return &quotaCopy, true
 }
 
 func (c *selectionCache) setSeasons(cacheID, key, ownerID string, seasons seer.SeasonSelection) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.initLocked()
-	itemKey := cacheKey(cacheID, key)
-	item, ok := c.items[itemKey]
-	if !ok || item.ownerID != ownerID || !time.Now().Before(item.expiresAt) {
+
+	selection, ok := c.selectionLocked(cacheID, key, ownerID)
+	if !ok {
 		return false
 	}
-	item.seasons = seer.SeasonSelection{
+	selection.seasons = seer.SeasonSelection{
 		Numbers: append([]int(nil), seasons.Numbers...),
 		All:     seasons.All,
 	}
-	c.items[itemKey] = item
 	return true
 }
 
 func (c *selectionCache) take(cacheID, key, ownerID string) (seer.SearchResult, seer.SeasonSelection, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.initLocked()
-	item, ok := c.items[cacheKey(cacheID, key)]
-	if !ok || item.ownerID != ownerID || !time.Now().Before(item.expiresAt) {
+
+	selection, ok := c.selectionLocked(cacheID, key, ownerID)
+	if !ok {
 		return seer.SearchResult{}, seer.SeasonSelection{}, false
 	}
-	c.discardLocked(cacheID, ownerID)
-	return item.result, item.seasons, true
+	result := selection.result
+	seasons := seer.SeasonSelection{
+		Numbers: append([]int(nil), selection.seasons.Numbers...),
+		All:     selection.seasons.All,
+	}
+	delete(c.searches, cacheID)
+	return result, seasons, true
 }
 
 func (c *selectionCache) discard(cacheID, ownerID string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.initLocked()
-	c.discardLocked(cacheID, ownerID)
-}
 
-func (c *selectionCache) discardLocked(cacheID, ownerID string) {
-	for itemKey, candidate := range c.items {
-		if candidate.ownerID == ownerID && strings.HasPrefix(itemKey, cacheID+":") {
-			delete(c.items, itemKey)
-		}
+	if _, ok := c.searchLocked(cacheID, ownerID); ok {
+		delete(c.searches, cacheID)
 	}
 }
 
+func (c *selectionCache) selectionLocked(cacheID, key, ownerID string) (*cachedSelection, bool) {
+	search, ok := c.searchLocked(cacheID, ownerID)
+	if !ok {
+		return nil, false
+	}
+	index, err := strconv.Atoi(key)
+	if err != nil || index < 0 || index >= len(search.results) {
+		return nil, false
+	}
+	return &search.results[index], true
+}
+
+func (c *selectionCache) searchLocked(cacheID, ownerID string) (*cachedSearch, bool) {
+	c.initLocked()
+	search, ok := c.searches[cacheID]
+	if !ok || search.ownerID != ownerID {
+		return nil, false
+	}
+	if !time.Now().Before(search.expiresAt) {
+		delete(c.searches, cacheID)
+		return nil, false
+	}
+	return search, true
+}
+
 func (c *selectionCache) initLocked() {
-	if c.items == nil {
-		c.items = map[string]cachedSelection{}
+	if c.searches == nil {
+		c.searches = make(map[string]*cachedSearch)
 	}
 }
 
 func (c *selectionCache) pruneLocked() {
 	now := time.Now()
-	for key, item := range c.items {
-		if now.After(item.expiresAt) {
-			delete(c.items, key)
+	for cacheID, search := range c.searches {
+		if !now.Before(search.expiresAt) {
+			delete(c.searches, cacheID)
 		}
 	}
-}
-
-func cacheKey(cacheID, key string) string {
-	return cacheID + ":" + key
 }
 
 func randomID() (string, error) {

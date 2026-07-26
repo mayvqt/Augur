@@ -48,6 +48,11 @@ func (b *Bot) handleRequest(s interactionSession, i *discordgo.InteractionCreate
 		b.ephemeral(s, i, "Type a title to search for.")
 		return
 	}
+	ownerID := interactionUserID(i)
+	if ownerID == "" {
+		b.ephemeral(s, i, "Discord did not provide your user ID. Try again.")
+		return
+	}
 	if !b.deferInteraction(s, i) {
 		return
 	}
@@ -66,21 +71,21 @@ func (b *Bot) handleRequest(s interactionSession, i *discordgo.InteractionCreate
 		b.logger.Error("generate result picker ID", "error", err)
 		return
 	}
-	selections := make(map[string]seer.SearchResult, 25)
+	selections := make([]seer.SearchResult, 0, 25)
 	for _, result := range results {
 		if len(options) == 25 {
 			break
 		}
 		label := truncate(optionLabel(result), 100)
 		key := strconv.Itoa(len(options))
-		selections[key] = result
+		selections = append(selections, result)
 		options = append(options, discordgo.SelectMenuOption{Label: label, Value: key})
 	}
 	if len(options) == 0 {
 		b.edit(s, i, "No movies or shows matched that search.")
 		return
 	}
-	b.cache.setMany(cacheID, interactionUserID(i), selections)
+	b.cache.set(cacheID, ownerID, selections)
 	msg := "Select a result to preview."
 	_, err = s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
 		Content:         &msg,
@@ -125,20 +130,23 @@ func (b *Bot) handlePick(s interactionSession, i *discordgo.InteractionCreate, d
 	}
 	ctx, cancel := context.WithTimeout(b.ctx, 20*time.Second)
 	defer cancel()
-	quota, err := b.handler.Quota(ctx, ownerID)
-	if err != nil {
-		b.logger.Warn("seer quota lookup failed", "discord_id", ownerID, "error", err)
+	quota, quotaKnown := b.cache.getQuota(cacheID, ownerID)
+	var quotaErr error
+	if !quotaKnown {
+		quota, quotaErr = b.handler.Quota(ctx, ownerID)
+		if quotaErr != nil {
+			b.logger.Warn("seer quota lookup failed", "discord_id", ownerID, "error", quotaErr)
+		} else if !b.cache.setQuota(cacheID, ownerID, quota) {
+			b.edit(s, i, "That picker expired. Run `/request` again.")
+			return
+		}
 	}
 	if result.MediaType != "tv" {
 		b.editBrowsablePreview(s, i, cacheID, key, b.mediaPreview(result, quota), previewComponents(cacheID, key))
 		return
 	}
-	if err != nil {
+	if quotaErr != nil {
 		b.editBrowsablePreview(s, i, cacheID, key, b.mediaPreview(result, nil), cancelComponents(cacheID))
-		return
-	}
-	if !b.cache.setQuota(cacheID, key, ownerID, quota) {
-		b.edit(s, i, "That picker expired. Run `/request` again.")
 		return
 	}
 	seasons, err := b.handler.TVSeasons(ctx, result.ID)
@@ -166,9 +174,8 @@ func (b *Bot) handleSeasons(s interactionSession, i *discordgo.InteractionCreate
 	if !b.deferComponentUpdate(s, i) {
 		return
 	}
-	value := strings.TrimPrefix(data.CustomID, componentSeasons)
-	cacheID, key, ok := strings.Cut(value, ":")
-	if !ok || cacheID == "" || key == "" {
+	cacheID, key, ok := componentSelection(data.CustomID, componentSeasons)
+	if !ok {
 		b.edit(s, i, "That season picker is invalid. Run `/request` again.")
 		return
 	}
@@ -184,9 +191,8 @@ func (b *Bot) handleAllSeasons(s interactionSession, i *discordgo.InteractionCre
 	if !b.deferComponentUpdate(s, i) {
 		return
 	}
-	value := strings.TrimPrefix(data.CustomID, componentAll)
-	cacheID, key, ok := strings.Cut(value, ":")
-	if !ok || cacheID == "" || key == "" {
+	cacheID, key, ok := componentSelection(data.CustomID, componentAll)
+	if !ok {
 		b.edit(s, i, "That season selection is invalid. Run `/request` again.")
 		return
 	}
@@ -200,12 +206,13 @@ func (b *Bot) showSeasonConfirmation(
 	key string,
 	selection seer.SeasonSelection,
 ) {
-	result, ok := b.cache.get(cacheID, key, interactionUserID(i))
+	ownerID := interactionUserID(i)
+	result, ok := b.cache.get(cacheID, key, ownerID)
 	if !ok || result.MediaType != "tv" {
 		b.edit(s, i, "That season picker expired. Run `/request` again.")
 		return
 	}
-	quota, ok := b.cache.getQuota(cacheID, key, interactionUserID(i))
+	quota, ok := b.cache.getQuota(cacheID, ownerID)
 	if !ok {
 		b.edit(s, i, "That season picker expired. Run `/request` again.")
 		return
@@ -214,7 +221,7 @@ func (b *Bot) showSeasonConfirmation(
 		b.edit(s, i, err.Error())
 		return
 	}
-	if !b.cache.setSeasons(cacheID, key, interactionUserID(i), selection) {
+	if !b.cache.setSeasons(cacheID, key, ownerID, selection) {
 		b.edit(s, i, "That season picker expired. Run `/request` again.")
 		return
 	}
@@ -249,20 +256,20 @@ func (b *Bot) handleConfirm(s interactionSession, i *discordgo.InteractionCreate
 	if !b.deferComponentUpdate(s, i) {
 		return
 	}
-	value := strings.TrimPrefix(data.CustomID, componentConfirm)
-	cacheID, key, ok := strings.Cut(value, ":")
-	if !ok || cacheID == "" || key == "" {
+	cacheID, key, ok := componentSelection(data.CustomID, componentConfirm)
+	if !ok {
 		b.edit(s, i, "That confirmation is invalid. Run `/request` again.")
 		return
 	}
-	result, seasons, ok := b.cache.take(cacheID, key, interactionUserID(i))
+	ownerID := interactionUserID(i)
+	result, seasons, ok := b.cache.take(cacheID, key, ownerID)
 	if !ok {
 		b.edit(s, i, "That confirmation expired or was already used. Run `/request` again.")
 		return
 	}
 	ctx, cancel := context.WithTimeout(b.ctx, 30*time.Second)
 	defer cancel()
-	_, err := b.handler.Request(ctx, interactionUserID(i), result, seasons)
+	_, err := b.handler.Request(ctx, ownerID, result, seasons)
 	if err != nil {
 		message := "Request failed. Try again in a minute."
 		var userErr interface{ UserMessage() string }
@@ -270,7 +277,7 @@ func (b *Bot) handleConfirm(s interactionSession, i *discordgo.InteractionCreate
 			message = userErr.UserMessage()
 		}
 		b.edit(s, i, truncate(message, 180))
-		b.logger.Error("request media failed", "discord_id", interactionUserID(i), "media_type", result.MediaType, "media_id", result.ID, "error", err)
+		b.logger.Error("request media failed", "discord_id", ownerID, "media_type", result.MediaType, "media_id", result.ID, "error", err)
 		return
 	}
 	title := escapeMarkdown(optionLabel(result))
@@ -309,6 +316,15 @@ func parseSeasonValues(values []string) (seer.SeasonSelection, error) {
 	}
 	sort.Ints(selection.Numbers)
 	return selection, nil
+}
+
+func componentSelection(customID, prefix string) (cacheID, key string, ok bool) {
+	value, found := strings.CutPrefix(customID, prefix)
+	if !found {
+		return "", "", false
+	}
+	cacheID, key, found = strings.Cut(value, ":")
+	return cacheID, key, found && cacheID != "" && key != ""
 }
 
 func validatePickerSelection(selection seer.SeasonSelection, quota *seer.Quota) error {
