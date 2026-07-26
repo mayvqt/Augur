@@ -116,6 +116,21 @@ func TestSearchDecodesAndDeduplicatesMediaMetadata(t *testing.T) {
 	}
 }
 
+func TestSearchEncodesSpacesAsPercent20(t *testing.T) {
+	t.Parallel()
+	client := newTestClient(t)
+	client.httpClient = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if got, want := r.URL.RawQuery, "page=1&query=lion%20king"; got != want {
+			t.Fatalf("RawQuery = %q, want %q", got, want)
+		}
+		return jsonResponse(t, map[string]any{"results": []any{}}), nil
+	})}
+
+	if _, err := client.Search(context.Background(), "lion king"); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestRequestMediaUsesSeerrUserIDAndAllSeasons(t *testing.T) {
 	t.Parallel()
 	var got map[string]any

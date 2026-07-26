@@ -142,10 +142,11 @@ func (c *Client) Search(ctx context.Context, query string) ([]SearchResult, erro
 	values := url.Values{}
 	values.Set("query", query)
 	values.Set("page", "1")
+	rawQuery := strings.ReplaceAll(values.Encode(), "+", "%20")
 	var out struct {
 		Results []SearchResult `json:"results"`
 	}
-	if err := c.do(ctx, http.MethodGet, "/api/v1/search?"+values.Encode(), nil, &out); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/api/v1/search?"+rawQuery, nil, &out); err != nil {
 		return nil, err
 	}
 	filtered := out.Results[:0]
