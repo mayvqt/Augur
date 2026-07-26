@@ -3,9 +3,9 @@ package discordbot
 import "github.com/bwmarrin/discordgo"
 
 const (
-	commandLink    = "link"
-	commandRequest = "request"
-	componentPick  = "augur:pick:"
+	commandLink      = "link"
+	commandRequest   = "request"
+	componentPick    = "augur:pick:"
 	componentConfirm = "augur:confirm:"
 	componentCancel  = "augur:cancel:"
 )

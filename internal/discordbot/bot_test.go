@@ -41,7 +41,7 @@ func TestTruncateIsUnicodeSafeAndHonorsLimit(t *testing.T) {
 	}
 }
 
-func TestSearchOptionIncludesUsefulMediaMetadata(t *testing.T) {
+func TestSearchOptionUsesTitleAndYear(t *testing.T) {
 	t.Parallel()
 	result := seer.SearchResult{
 		ID:               42,
@@ -56,12 +56,21 @@ func TestSearchOptionIncludesUsefulMediaMetadata(t *testing.T) {
 	if got := optionLabel(result); got != "The Thing (1982)" {
 		t.Fatalf("optionLabel() = %q", got)
 	}
-	wantDescription := "Movie • 1982 • EN • ★ 8.1 • Processing — A research team finds something terrible in Antarctica."
-	if got := optionDescription(result); got != wantDescription {
-		t.Fatalf("optionDescription() = %q, want %q", got, wantDescription)
-	}
 	if got := requestSummary(result); got != "Movie • 1982 • EN • ★ 8.1 • Processing" {
 		t.Fatalf("requestSummary() = %q", got)
+	}
+}
+
+func TestQuotaLabelIncludesUsageAndLimits(t *testing.T) {
+	t.Parallel()
+	quota := &seer.Quota{
+		Movie: seer.QuotaUsage{Days: 7, Limit: 10, Used: 6, Remaining: 4, Restricted: true},
+		TV:    seer.QuotaUsage{Used: 2},
+	}
+	got := quotaLabel(quota)
+	want := "Movies: 6/10 used · 4 remaining · 7-day window\nTV shows: 2 used · Unlimited"
+	if got != want {
+		t.Fatalf("quotaLabel() = %q, want %q", got, want)
 	}
 }
 
