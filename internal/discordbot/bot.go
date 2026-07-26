@@ -13,6 +13,7 @@ import (
 
 type Handler interface {
 	Search(ctx context.Context, query string) ([]seer.SearchResult, error)
+	Quota(ctx context.Context, discordID string) (*seer.Quota, error)
 	Request(ctx context.Context, discordID string, result seer.SearchResult) (seer.Request, error)
 }
 

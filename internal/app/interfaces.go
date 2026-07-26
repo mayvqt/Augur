@@ -11,6 +11,7 @@ import (
 type seerClient interface {
 	Search(ctx context.Context, query string) ([]seer.SearchResult, error)
 	FindUserByDiscordID(ctx context.Context, discordID string) (seer.User, bool, error)
+	UserQuota(ctx context.Context, userID int) (seer.Quota, error)
 	RequestMedia(ctx context.Context, userID int, mediaType string, mediaID int) (seer.Request, error)
 	Request(ctx context.Context, id int) (seer.Request, error)
 }

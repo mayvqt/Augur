@@ -41,6 +41,7 @@ type fakeSeer struct {
 	searchResults   []seer.SearchResult
 	user            seer.User
 	found           bool
+	quota           seer.Quota
 	createdRequest  seer.Request
 	requestByID     map[int]seer.Request
 	requestFailures int
@@ -65,6 +66,13 @@ func (f *fakeSeer) FindUserByDiscordID(ctx context.Context, discordID string) (s
 		return seer.User{}, false, err
 	}
 	return f.user, f.found, nil
+}
+
+func (f *fakeSeer) UserQuota(ctx context.Context, userID int) (seer.Quota, error) {
+	if err := ctx.Err(); err != nil {
+		return seer.Quota{}, err
+	}
+	return f.quota, nil
 }
 
 func (f *fakeSeer) RequestMedia(ctx context.Context, userID int, mediaType string, mediaID int) (seer.Request, error) {

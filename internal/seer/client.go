@@ -75,6 +75,19 @@ type User struct {
 	ID int `json:"id"`
 }
 
+type Quota struct {
+	Movie QuotaUsage `json:"movie"`
+	TV    QuotaUsage `json:"tv"`
+}
+
+type QuotaUsage struct {
+	Days       int  `json:"days"`
+	Limit      int  `json:"limit"`
+	Used       int  `json:"used"`
+	Remaining  int  `json:"remaining"`
+	Restricted bool `json:"restricted"`
+}
+
 type Request struct {
 	ID        int    `json:"id"`
 	Status    any    `json:"status"`
@@ -253,6 +266,15 @@ func (c *Client) NotificationSettings(ctx context.Context, userID int) (Notifica
 	}
 	var out NotificationSettings
 	err := c.do(ctx, http.MethodGet, "/api/v1/user/"+strconv.Itoa(userID)+"/settings/notifications", nil, &out)
+	return out, err
+}
+
+func (c *Client) UserQuota(ctx context.Context, userID int) (Quota, error) {
+	if userID <= 0 {
+		return Quota{}, errors.New("user ID must be positive")
+	}
+	var out Quota
+	err := c.do(ctx, http.MethodGet, "/api/v1/user/"+strconv.Itoa(userID)+"/quota", nil, &out)
 	return out, err
 }
 

@@ -24,10 +24,39 @@ func (b *Bot) deferInteraction(s interactionSession, i *discordgo.InteractionCre
 	return true
 }
 
+func (b *Bot) deferComponentUpdate(s interactionSession, i *discordgo.InteractionCreate) bool {
+	err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseDeferredMessageUpdate,
+	})
+	if err != nil {
+		b.logger.Error("defer component interaction", "error", err)
+		return false
+	}
+	return true
+}
+
 func (b *Bot) edit(s interactionSession, i *discordgo.InteractionCreate, msg string) {
-	_, err := s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{Content: &msg, AllowedMentions: noMentions(), Components: &[]discordgo.MessageComponent{}})
+	_, err := s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
+		Content:         &msg,
+		Embeds:          &[]*discordgo.MessageEmbed{},
+		AllowedMentions: noMentions(),
+		Components:      &[]discordgo.MessageComponent{},
+	})
 	if err != nil {
 		b.logger.Error("edit interaction", "error", err)
+	}
+}
+
+func (b *Bot) editPreview(s interactionSession, i *discordgo.InteractionCreate, embed *discordgo.MessageEmbed, components []discordgo.MessageComponent) {
+	content := ""
+	_, err := s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
+		Content:         &content,
+		Embeds:          &[]*discordgo.MessageEmbed{embed},
+		AllowedMentions: noMentions(),
+		Components:      &components,
+	})
+	if err != nil {
+		b.logger.Error("edit request preview", "error", err)
 	}
 }
 

@@ -33,6 +33,24 @@ func (r *Runner) Search(ctx context.Context, query string) ([]seer.SearchResult,
 	return r.seer.Search(ctx, query)
 }
 
+func (r *Runner) Quota(ctx context.Context, discordID string) (*seer.Quota, error) {
+	if !r.cfg.Link.RequireMatch {
+		return nil, nil
+	}
+	user, ok, err := r.seer.FindUserByDiscordID(ctx, strings.TrimSpace(discordID))
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, &userFacingError{message: "Your Discord account is not linked in Seerr yet. Run `/link` first."}
+	}
+	quota, err := r.seer.UserQuota(ctx, user.ID)
+	if err != nil {
+		return nil, err
+	}
+	return &quota, nil
+}
+
 func (r *Runner) Request(ctx context.Context, discordID string, result seer.SearchResult) (seer.Request, error) {
 	r.metrics.requests.Add(1)
 	discordID = strings.TrimSpace(discordID)
