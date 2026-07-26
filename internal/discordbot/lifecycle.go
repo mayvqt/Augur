@@ -38,7 +38,7 @@ func (b *Bot) Close() error {
 	return b.session.Close()
 }
 
-func (b *Bot) NotifyComplete(ctx context.Context, discordID, title string) error {
+func (b *Bot) NotifyComplete(ctx context.Context, discordID, title, mediaType string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -49,8 +49,9 @@ func (b *Bot) NotifyComplete(ctx context.Context, discordID, title string) error
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	embed := completionEmbed(title, mediaType)
 	_, err = b.session.ChannelMessageSendComplex(channel.ID, &discordgo.MessageSend{
-		Content:         fmt.Sprintf("Your request is complete: **%s** is now fully available.", escapeMarkdown(title)),
+		Embeds:          []*discordgo.MessageEmbed{embed},
 		AllowedMentions: noMentions(),
 	})
 	return err

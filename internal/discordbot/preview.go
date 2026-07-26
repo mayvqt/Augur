@@ -8,6 +8,19 @@ import (
 	"github.com/mayvqt/Augur/internal/seer"
 )
 
+func completionEmbed(title, mediaType string) *discordgo.MessageEmbed {
+	title = normalizeInlineText(title)
+	if title == "" {
+		title = "Requested media"
+	}
+	return &discordgo.MessageEmbed{
+		Title:       "Now available",
+		Description: fmt.Sprintf("**%s** is now fully available.", escapeMarkdown(title)),
+		Color:       0x57f287,
+		Footer:      &discordgo.MessageEmbedFooter{Text: mediaTypeLabel(mediaType)},
+	}
+}
+
 func (b *Bot) mediaPreview(result seer.SearchResult, quota *seer.Quota) *discordgo.MessageEmbed {
 	embed := &discordgo.MessageEmbed{
 		Title:       optionLabel(result),

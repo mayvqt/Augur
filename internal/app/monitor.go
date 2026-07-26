@@ -45,7 +45,12 @@ func (r *Runner) checkSubscriptions(ctx context.Context) {
 		if !seer.IsAvailable(req) {
 			continue
 		}
-		if err := r.bot.NotifyComplete(ctx, subscription.DiscordID, subscription.Title); err != nil {
+		if err := r.bot.NotifyComplete(
+			ctx,
+			subscription.DiscordID,
+			subscription.Title,
+			subscription.MediaType,
+		); err != nil {
 			r.metrics.notificationFailures.Add(1)
 			r.logger.Error("send completion dm", "request_id", subscription.RequestID, "discord_id", subscription.DiscordID, "error", err)
 			continue

@@ -10,6 +10,21 @@ import (
 	"github.com/mayvqt/Augur/internal/seer"
 )
 
+func TestCompletionEmbedIncludesMediaMetadata(t *testing.T) {
+	t.Parallel()
+	embed := completionEmbed("The Lion King", "movie")
+
+	if embed.Title != "Now available" {
+		t.Fatalf("title = %q", embed.Title)
+	}
+	if embed.Description != "**The Lion King** is now fully available." {
+		t.Fatalf("description = %q", embed.Description)
+	}
+	if embed.Footer == nil || embed.Footer.Text != "Movie" {
+		t.Fatalf("footer = %#v", embed.Footer)
+	}
+}
+
 func TestLinkURLUsesDiscordNotificationSettings(t *testing.T) {
 	t.Parallel()
 	bot := &Bot{link: config.LinkConfig{PublicURL: "https://seerr.example.test"}}

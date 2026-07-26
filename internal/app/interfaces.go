@@ -26,6 +26,6 @@ type subscriptionStore interface {
 
 type notifier interface {
 	Start(ctx context.Context) error
-	NotifyComplete(ctx context.Context, discordID, title string) error
+	NotifyComplete(ctx context.Context, discordID, title, mediaType string) error
 	Close() error
 }
