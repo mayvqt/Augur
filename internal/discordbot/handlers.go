@@ -71,21 +71,16 @@ func (b *Bot) handleRequest(s interactionSession, i *discordgo.InteractionCreate
 			break
 		}
 		label := truncate(optionLabel(result), 100)
-		description := truncate(optionDescription(result), 100)
 		key := strconv.Itoa(len(options))
 		selections[key] = result
-		options = append(options, discordgo.SelectMenuOption{Label: label, Description: description, Value: key})
+		options = append(options, discordgo.SelectMenuOption{Label: label, Value: key})
 	}
 	if len(options) == 0 {
 		b.edit(s, i, "No movies or shows matched that search.")
 		return
 	}
 	b.cache.setMany(cacheID, interactionUserID(i), selections)
-<<<<<<< Updated upstream
-	msg := "Pick the result to request."
-=======
 	msg := "Select a result to preview."
->>>>>>> Stashed changes
 	_, err = s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
 		Content: &msg,
 		Components: &[]discordgo.MessageComponent{discordgo.ActionsRow{Components: []discordgo.MessageComponent{
@@ -124,17 +119,19 @@ func (b *Bot) handlePick(s interactionSession, i *discordgo.InteractionCreate, d
 		return
 	}
 	cacheID := strings.TrimPrefix(data.CustomID, componentPick)
-<<<<<<< Updated upstream
-	result, ok := b.cache.take(cacheID, data.Values[0], interactionUserID(i))
-=======
 	key := data.Values[0]
 	result, ok := b.cache.get(cacheID, key, interactionUserID(i))
->>>>>>> Stashed changes
 	if !ok {
 		b.edit(s, i, "That picker expired. Run `/request` again.")
 		return
 	}
-	b.editPreview(s, i, b.mediaPreview(result), previewComponents(cacheID, key))
+	ctx, cancel := context.WithTimeout(b.ctx, 20*time.Second)
+	defer cancel()
+	quota, err := b.handler.Quota(ctx, interactionUserID(i))
+	if err != nil {
+		b.logger.Warn("seer quota lookup failed", "discord_id", interactionUserID(i), "error", err)
+	}
+	b.editPreview(s, i, b.mediaPreview(result, quota), previewComponents(cacheID, key))
 }
 
 func (b *Bot) handleConfirm(s interactionSession, i *discordgo.InteractionCreate, data discordgo.MessageComponentInteractionData) {
@@ -156,25 +153,17 @@ func (b *Bot) handleConfirm(s interactionSession, i *discordgo.InteractionCreate
 	defer cancel()
 	_, err := b.handler.Request(ctx, interactionUserID(i), result)
 	if err != nil {
-<<<<<<< Updated upstream
 		message := "Request failed. Try again in a minute."
 		var userErr interface{ UserMessage() string }
 		if errors.As(err, &userErr) {
 			message = userErr.UserMessage()
 		}
 		b.edit(s, i, truncate(message, 180))
-=======
-		b.edit(s, i, "Request failed: "+truncate(err.Error(), 160))
->>>>>>> Stashed changes
 		b.logger.Error("request media failed", "discord_id", interactionUserID(i), "media_type", result.MediaType, "media_id", result.ID, "error", err)
 		return
 	}
 	title := escapeMarkdown(optionLabel(result))
-<<<<<<< Updated upstream
-	summary := escapeMarkdown(requestSummary(result))
-	b.edit(s, i, fmt.Sprintf("Requested **%s**\n%s\nI will DM you when it is fully available.", title, summary))
-=======
-	b.edit(s, i, fmt.Sprintf("Requested **%s**.\nI will DM you when it is fully available.", title))
+	b.edit(s, i, fmt.Sprintf("Your request for **%s** has been submitted successfully.\nYou will receive a direct message when it is fully available.", title))
 }
 
 func (b *Bot) handleCancel(s interactionSession, i *discordgo.InteractionCreate, data discordgo.MessageComponentInteractionData) {
@@ -184,5 +173,4 @@ func (b *Bot) handleCancel(s interactionSession, i *discordgo.InteractionCreate,
 	cacheID := strings.TrimPrefix(data.CustomID, componentCancel)
 	b.cache.discard(cacheID, interactionUserID(i))
 	b.edit(s, i, "Request cancelled.")
->>>>>>> Stashed changes
 }

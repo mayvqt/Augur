@@ -26,8 +26,7 @@ func (b *Bot) Start(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return errors.Join(err, b.session.Close())
 	}
-	_, err := b.session.ApplicationCommandBulkOverwrite(b.session.State.User.ID, b.cfg.GuildID, slashCommands())
-	if err != nil {
+	if err := b.registerCommands(); err != nil {
 		return errors.Join(err, b.session.Close())
 	}
 	b.logger.Info("discord slash commands registered", "guild_id", b.cfg.GuildID)
@@ -51,10 +50,32 @@ func (b *Bot) NotifyComplete(ctx context.Context, discordID, title string) error
 		return err
 	}
 	_, err = b.session.ChannelMessageSendComplex(channel.ID, &discordgo.MessageSend{
-		Content:         fmt.Sprintf("Your request for **%s** is now available.", escapeMarkdown(title)),
+		Content:         fmt.Sprintf("Your request is complete: **%s** is now fully available.", escapeMarkdown(title)),
 		AllowedMentions: noMentions(),
 	})
 	return err
+}
+
+func (b *Bot) registerCommands() error {
+	appID := b.session.State.User.ID
+	if _, err := b.session.ApplicationCommandBulkOverwrite(appID, b.cfg.GuildID, slashCommands()); err != nil {
+		return fmt.Errorf("register slash commands: %w", err)
+	}
+	if b.cfg.GuildID != "" {
+		if _, err := b.session.ApplicationCommandBulkOverwrite(appID, "", []*discordgo.ApplicationCommand{}); err != nil {
+			return fmt.Errorf("remove duplicate global slash commands: %w", err)
+		}
+		return nil
+	}
+	for _, guild := range b.session.State.Guilds {
+		if guild == nil {
+			continue
+		}
+		if _, err := b.session.ApplicationCommandBulkOverwrite(appID, guild.ID, []*discordgo.ApplicationCommand{}); err != nil {
+			return fmt.Errorf("remove duplicate slash commands from guild %s: %w", guild.ID, err)
+		}
+	}
+	return nil
 }
 
 func (b *Bot) onReady(_ *discordgo.Session, event *discordgo.Ready) {
