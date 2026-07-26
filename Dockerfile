@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 
-FROM golang:1.26.4-alpine AS build
+FROM golang:1.26.5-alpine AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod go mod download
@@ -9,7 +9,7 @@ COPY internal ./internal
 RUN --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/augur ./cmd/augur
 
-FROM alpine:3.21
+FROM alpine:3.24
 LABEL org.opencontainers.image.source="https://github.com/mayvqt/Augur" \
       org.opencontainers.image.title="Augur" \
       org.opencontainers.image.description="Discord request bot for Seerr"
