@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -18,6 +19,9 @@ func Load(path string) (Config, error) {
 	}
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
+	if err := rejectDuplicateKeys(data); err != nil {
+		return cfg, err
+	}
 	if err := decoder.Decode(&cfg); err != nil {
 		return cfg, err
 	}
@@ -33,6 +37,58 @@ func Load(path string) (Config, error) {
 	}
 	cfg.Normalize()
 	return cfg, cfg.Validate()
+}
+
+func rejectDuplicateKeys(data []byte) error {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	var walk func() error
+	walk = func() error {
+		token, err := decoder.Token()
+		if err != nil {
+			return err
+		}
+		delimiter, ok := token.(json.Delim)
+		if !ok {
+			return nil
+		}
+		switch delimiter {
+		case '{':
+			keys := make(map[string]struct{})
+			for decoder.More() {
+				keyToken, err := decoder.Token()
+				if err != nil {
+					return err
+				}
+				key, ok := keyToken.(string)
+				if !ok {
+					return errors.New("configuration object key is not a string")
+				}
+				if _, duplicate := keys[key]; duplicate {
+					return errors.New("configuration contains duplicate key " + key)
+				}
+				keys[key] = struct{}{}
+				if err := walk(); err != nil {
+					return err
+				}
+			}
+			_, err = decoder.Token()
+			return err
+		case '[':
+			for decoder.More() {
+				if err := walk(); err != nil {
+					return err
+				}
+			}
+			_, err = decoder.Token()
+			return err
+		default:
+			return errors.New("configuration contains unexpected JSON delimiter")
+		}
+	}
+	if err := walk(); err != nil {
+		return err
+	}
+	return nil
 }
 
 func defaults() Config {
@@ -51,7 +107,7 @@ func defaults() Config {
 		},
 		Storage: StorageConfig{Path: "augur-state.db"},
 		Worker:  WorkerConfig{PollInterval: Duration(2 * time.Minute)},
-		Health:  HealthConfig{Address: "127.0.0.1:8080"},
+		Health:  HealthConfig{Address: "127.0.0.1:0"},
 	}
 }
 
@@ -61,9 +117,19 @@ func (c *Config) Normalize() {
 	c.Discord.Presence.Status = strings.ToLower(strings.TrimSpace(c.Discord.Presence.Status))
 	c.Discord.Presence.Type = strings.ToLower(strings.TrimSpace(c.Discord.Presence.Type))
 	c.Discord.Presence.Message = strings.TrimSpace(c.Discord.Presence.Message)
-	c.Seer.BaseURL = strings.TrimRight(strings.TrimSpace(c.Seer.BaseURL), "/")
+	c.Seer.BaseURL = normalizeURL(c.Seer.BaseURL)
 	c.Seer.APIKey = strings.TrimSpace(c.Seer.APIKey)
-	c.Link.PublicURL = strings.TrimRight(strings.TrimSpace(c.Link.PublicURL), "/")
+	c.Link.PublicURL = normalizeURL(c.Link.PublicURL)
 	c.Storage.Path = strings.TrimSpace(c.Storage.Path)
 	c.Health.Address = strings.TrimSpace(c.Health.Address)
+}
+
+func normalizeURL(value string) string {
+	value = strings.TrimSpace(value)
+	parsed, err := url.Parse(value)
+	if err != nil {
+		return value
+	}
+	parsed.Path = strings.TrimRight(parsed.Path, "/")
+	return parsed.String()
 }

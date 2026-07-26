@@ -2,7 +2,7 @@
 
 Augur is a headless Discord bot for [Seerr](https://github.com/seerr-team/seerr).
 
-It lets Discord users link their Seerr account, search movies and shows with `/request`, submit requests from a dropdown, and receive a DM when a watched request becomes available.
+It lets Discord users link their Seerr account, search movies and shows with `/request`, submit requests from a dropdown, and receive a DM when the requested media becomes available.
 
 ## Quick Start
 

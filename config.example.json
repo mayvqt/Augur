@@ -1,6 +1,6 @@
 {
   "discord": {
-    "token": "replace-me",
+    "token": "",
     "guild_id": "",
     "presence": {
       "enabled": true,
@@ -10,12 +10,12 @@
     }
   },
   "seer": {
-    "base_url": "https://seer.example.com",
-    "api_key": "replace-me",
+    "base_url": "",
+    "api_key": "",
     "timeout": "15s"
   },
   "link": {
-    "public_url": "https://seer.example.com",
+    "public_url": "",
     "require_match": true
   },
   "storage": {
@@ -26,6 +26,6 @@
   },
   "health": {
     "enabled": false,
-    "address": "127.0.0.1:8080"
+    "address": "127.0.0.1:0"
   }
 }

@@ -23,7 +23,7 @@
   <Config Name="Require Linked User" Target="AUGUR_LINK_REQUIRE_MATCH" Default="true" Mode="" Description="Require the user's Discord ID64 to be present in their Seerr notification settings before allowing /request." Type="Variable" Display="always" Required="true" Mask="false">true</Config>
   <Config Name="Database Path" Target="AUGUR_STORAGE_PATH" Default="/data/augur-state.db" Mode="" Description="SQLite database file path inside the container." Type="Variable" Display="advanced" Required="true" Mask="false">/data/augur-state.db</Config>
   <Config Name="Poll Interval" Target="AUGUR_WORKER_POLL_INTERVAL" Default="2m" Mode="" Description="How often Augur checks Seerr for completed requests." Type="Variable" Display="advanced" Required="true" Mask="false">2m</Config>
-  <Config Name="Health Port" Target="8080" Default="8080" Mode="tcp" Description="Optional HTTP health, readiness, and JSON metrics port." Type="Port" Display="advanced" Required="false" Mask="false">8080</Config>
-  <Config Name="Health Enabled" Target="AUGUR_HEALTH_ENABLED" Default="true" Mode="" Description="Enable /healthz, /readyz, and /metrics." Type="Variable" Display="advanced" Required="true" Mask="false">true</Config>
-  <Config Name="Health Address" Target="AUGUR_HEALTH_ADDRESS" Default="0.0.0.0:8080" Mode="" Description="Listen address for the health server inside the container." Type="Variable" Display="advanced" Required="true" Mask="false">0.0.0.0:8080</Config>
+  <Config Name="Health Port" Target="39271" Default="39271" Mode="tcp" Description="Optional HTTP health, readiness, and JSON metrics port." Type="Port" Display="advanced" Required="false" Mask="false">39271</Config>
+  <Config Name="Health Enabled" Target="AUGUR_HEALTH_ENABLED" Default="false" Mode="" Description="Enable /healthz, /readyz, and /metrics." Type="Variable" Display="advanced" Required="true" Mask="false">false</Config>
+  <Config Name="Health Address" Target="AUGUR_HEALTH_ADDRESS" Default="0.0.0.0:39271" Mode="" Description="Listen address for the health server inside the container." Type="Variable" Display="advanced" Required="true" Mask="false">0.0.0.0:39271</Config>
 </Container>

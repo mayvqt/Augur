@@ -12,7 +12,7 @@ import (
 	"github.com/mayvqt/Augur/internal/storage"
 )
 
-func newTestRunner(cfg config.Config, seerClient seerClient, store watchStore, bot notifier) *Runner {
+func newTestRunner(cfg config.Config, seerClient seerClient, store subscriptionStore, bot notifier) *Runner {
 	return newWithDeps(cfg, seerClient, store, bot, slog.New(slog.NewTextHandler(io.Discard, nil)))
 }
 
@@ -93,48 +93,43 @@ func (f *fakeSeer) Request(ctx context.Context, id int) (seer.Request, error) {
 }
 
 type fakeStore struct {
-	open      []storage.Watch
-	openByID  map[int]storage.Watch
-	added     []storage.Watch
-	completed []storage.Watch
-	pingErr   error
+	pending     []storage.Subscription
+	pendingByID map[int]storage.Subscription
+	added       []storage.Subscription
+	completed   []storage.Subscription
+	pingErr     error
 }
 
-func (f *fakeStore) AddWatch(ctx context.Context, watch storage.Watch) error {
+func (f *fakeStore) AddSubscription(ctx context.Context, subscription storage.Subscription) (bool, error) {
 	if err := ctx.Err(); err != nil {
-		return err
+		return false, err
 	}
-	f.added = append(f.added, watch)
-	return nil
+	if existing, ok := f.pendingByID[subscription.RequestID]; ok && existing.DiscordID == subscription.DiscordID {
+		return false, nil
+	}
+	f.added = append(f.added, subscription)
+	return true, nil
 }
 
-func (f *fakeStore) OpenWatch(ctx context.Context, requestID int) (storage.Watch, bool, error) {
-	if err := ctx.Err(); err != nil {
-		return storage.Watch{}, false, err
-	}
-	watch, ok := f.openByID[requestID]
-	return watch, ok, nil
-}
-
-func (f *fakeStore) OpenWatches(ctx context.Context) ([]storage.Watch, error) {
+func (f *fakeStore) PendingSubscriptions(ctx context.Context) ([]storage.Subscription, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	return append([]storage.Watch(nil), f.open...), nil
+	return append([]storage.Subscription(nil), f.pending...), nil
 }
 
-func (f *fakeStore) CompleteWatch(ctx context.Context, requestID int, completedAt time.Time) (storage.Watch, bool, error) {
+func (f *fakeStore) CompleteSubscription(ctx context.Context, requestID int, discordID string, completedAt time.Time) (storage.Subscription, bool, error) {
 	if err := ctx.Err(); err != nil {
-		return storage.Watch{}, false, err
+		return storage.Subscription{}, false, err
 	}
-	for _, watch := range f.open {
-		if watch.RequestID == requestID {
-			watch.CompletedAt = completedAt
-			f.completed = append(f.completed, watch)
-			return watch, true, nil
+	for _, subscription := range f.pending {
+		if subscription.RequestID == requestID && subscription.DiscordID == discordID {
+			subscription.CompletedAt = completedAt
+			f.completed = append(f.completed, subscription)
+			return subscription, true, nil
 		}
 	}
-	return storage.Watch{}, false, nil
+	return storage.Subscription{}, false, nil
 }
 
 func (f *fakeStore) Ping(ctx context.Context) error {
@@ -155,6 +150,7 @@ type notification struct {
 
 type fakeNotifier struct {
 	notifications []notification
+	notifyErr     error
 }
 
 func (f *fakeNotifier) Start(ctx context.Context) error {
@@ -164,6 +160,9 @@ func (f *fakeNotifier) Start(ctx context.Context) error {
 func (f *fakeNotifier) NotifyComplete(ctx context.Context, discordID, title string) error {
 	if err := ctx.Err(); err != nil {
 		return err
+	}
+	if f.notifyErr != nil {
+		return f.notifyErr
 	}
 	f.notifications = append(f.notifications, notification{discordID: discordID, title: title})
 	return nil

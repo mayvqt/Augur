@@ -33,7 +33,7 @@ Set `AUGUR_GUILD_ID` while testing so slash commands update quickly. Leave it bl
 | Network | `bridge`, unless your Seerr stack needs a custom Docker network. |
 | PUID / PGID | Unraid defaults are `99` / `100`. |
 
-Augur stores request watch state in `/data/augur-state.db` using SQLite with WAL journaling.
+Augur stores request subscription state in `/data/augur-state.db` using SQLite with WAL journaling.
 
 ## Quick Checks
 

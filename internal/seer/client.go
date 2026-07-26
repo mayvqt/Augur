@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -57,12 +58,16 @@ type Config struct {
 }
 
 type SearchResult struct {
-	ID           int    `json:"id"`
-	MediaType    string `json:"mediaType"`
-	Title        string `json:"title"`
-	Name         string `json:"name"`
-	ReleaseDate  string `json:"releaseDate"`
-	FirstAirDate string `json:"firstAirDate"`
+	ID               int     `json:"id"`
+	MediaType        string  `json:"mediaType"`
+	Title            string  `json:"title"`
+	Name             string  `json:"name"`
+	Overview         string  `json:"overview"`
+	OriginalLanguage string  `json:"originalLanguage"`
+	ReleaseDate      string  `json:"releaseDate"`
+	FirstAirDate     string  `json:"firstAirDate"`
+	VoteAverage      float64 `json:"voteAverage"`
+	MediaInfo        *Media  `json:"mediaInfo"`
 }
 
 type User struct {
@@ -84,12 +89,35 @@ type NotificationSettings struct {
 	DiscordIDs []string `json:"discordIds"`
 }
 
-func New(cfg Config) *Client {
-	return &Client{
-		baseURL:    strings.TrimRight(cfg.BaseURL, "/"),
-		apiKey:     cfg.APIKey,
-		httpClient: &http.Client{Timeout: cfg.Timeout},
+func New(cfg Config) (*Client, error) {
+	cfg.BaseURL = strings.TrimRight(strings.TrimSpace(cfg.BaseURL), "/")
+	cfg.APIKey = strings.TrimSpace(cfg.APIKey)
+	parsed, err := url.Parse(cfg.BaseURL)
+	if err != nil ||
+		(parsed.Scheme != "http" && parsed.Scheme != "https") ||
+		parsed.Hostname() == "" ||
+		parsed.User != nil ||
+		parsed.RawQuery != "" ||
+		parsed.ForceQuery ||
+		parsed.Fragment != "" {
+		return nil, errors.New("Seerr base URL must be an absolute http or https URL without credentials, query parameters, or a fragment")
 	}
+	if cfg.APIKey == "" {
+		return nil, errors.New("Seerr API key is required")
+	}
+	if cfg.Timeout <= 0 {
+		return nil, errors.New("Seerr timeout must be positive")
+	}
+	return &Client{
+		baseURL: cfg.BaseURL,
+		apiKey:  cfg.APIKey,
+		httpClient: &http.Client{
+			Timeout: cfg.Timeout,
+			CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		},
+	}, nil
 }
 
 func (c *Client) Search(ctx context.Context, query string) ([]SearchResult, error) {
@@ -107,11 +135,17 @@ func (c *Client) Search(ctx context.Context, query string) ([]SearchResult, erro
 		return nil, err
 	}
 	filtered := out.Results[:0]
+	seen := make(map[string]struct{}, len(out.Results))
 	for _, result := range out.Results {
-		if result.ID == 0 {
+		if result.ID <= 0 {
 			continue
 		}
 		if result.MediaType == "movie" || result.MediaType == "tv" {
+			key := result.MediaType + ":" + strconv.Itoa(result.ID)
+			if _, duplicate := seen[key]; duplicate {
+				continue
+			}
+			seen[key] = struct{}{}
 			filtered = append(filtered, result)
 		}
 	}
@@ -123,7 +157,9 @@ func (c *Client) FindUserByDiscordID(ctx context.Context, discordID string) (Use
 	if discordID == "" {
 		return User{}, false, errors.New("discord ID is required")
 	}
-	for skip := 0; skip < 2000; skip += 100 {
+	var matched User
+	seenUsers := make(map[int]struct{})
+	for skip := 0; ; skip += 100 {
 		values := url.Values{}
 		values.Set("take", "100")
 		values.Set("skip", strconv.Itoa(skip))
@@ -134,25 +170,40 @@ func (c *Client) FindUserByDiscordID(ctx context.Context, discordID string) (Use
 			return User{}, false, err
 		}
 		for _, user := range page.Results {
-			if user.ID == 0 {
+			if user.ID <= 0 {
 				continue
 			}
+			if _, duplicate := seenUsers[user.ID]; duplicate {
+				continue
+			}
+			seenUsers[user.ID] = struct{}{}
 			settings, err := c.NotificationSettings(ctx, user.ID)
 			if err != nil {
 				return User{}, false, err
 			}
 			if settings.HasDiscordID(discordID) {
-				return user, true, nil
+				if matched.ID != 0 && matched.ID != user.ID {
+					return User{}, false, fmt.Errorf("Discord ID is linked to multiple Seerr users (%d and %d)", matched.ID, user.ID)
+				}
+				matched = user
 			}
 		}
 		if len(page.Results) < 100 {
-			return User{}, false, nil
+			return matched, matched.ID != 0, nil
+		}
+		if skip > math.MaxInt-100 {
+			return User{}, false, errors.New("Seerr user pagination overflowed")
+		}
+		if len(seenUsers) <= skip {
+			return User{}, false, errors.New("Seerr user pagination did not advance")
 		}
 	}
-	return User{}, false, errors.New("too many Seerr users to scan; raise the scan limit in code")
 }
 
 func (c *Client) RequestMedia(ctx context.Context, userID int, mediaType string, mediaID int) (Request, error) {
+	if userID < 0 {
+		return Request{}, errors.New("user ID must not be negative")
+	}
 	if mediaID <= 0 {
 		return Request{}, errors.New("media ID must be positive")
 	}
@@ -174,6 +225,9 @@ func (c *Client) RequestMedia(ctx context.Context, userID int, mediaType string,
 	if err := c.do(ctx, http.MethodPost, "/api/v1/request", body, &out); err != nil {
 		return Request{}, err
 	}
+	if out.ID <= 0 {
+		return Request{}, errors.New("Seerr create-request response is missing a valid request ID")
+	}
 	return out, nil
 }
 
@@ -183,7 +237,13 @@ func (c *Client) Request(ctx context.Context, id int) (Request, error) {
 	}
 	var out Request
 	err := c.do(ctx, http.MethodGet, "/api/v1/request/"+strconv.Itoa(id), nil, &out)
-	return out, err
+	if err != nil {
+		return Request{}, err
+	}
+	if out.ID != id {
+		return Request{}, fmt.Errorf("Seerr request response ID is %d, expected %d", out.ID, id)
+	}
+	return out, nil
 }
 
 func (c *Client) NotificationSettings(ctx context.Context, userID int) (NotificationSettings, error) {
@@ -215,10 +275,27 @@ func (c *Client) do(ctx context.Context, method, path string, body any, out any)
 	if out == nil || len(data) == 0 {
 		return nil
 	}
-	if err := json.Unmarshal(data, out); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+	if err := decoder.Decode(out); err != nil {
+		return fmt.Errorf("decode seerr %s %s response: %w", method, path, err)
+	}
+	if err := ensureJSONEOF(decoder); err != nil {
 		return fmt.Errorf("decode seerr %s %s response: %w", method, path, err)
 	}
 	return nil
+}
+
+func ensureJSONEOF(decoder *json.Decoder) error {
+	var trailing any
+	err := decoder.Decode(&trailing)
+	if errors.Is(err, io.EOF) {
+		return nil
+	}
+	if err == nil {
+		return errors.New("response contains trailing JSON data")
+	}
+	return err
 }
 
 func (c *Client) newRequest(ctx context.Context, method, path string, body any) (*http.Request, error) {

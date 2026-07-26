@@ -2,14 +2,17 @@ package config
 
 import (
 	"errors"
+	"net"
 	"net/url"
+	"strconv"
+	"strings"
 )
 
 func (c Config) Validate() error {
 	if c.Discord.Token == "" {
 		return errors.New("discord.token is required")
 	}
-	if c.Discord.GuildID != "" && !isDiscordID(c.Discord.GuildID) {
+	if c.Discord.GuildID != "" && !IsDiscordID(c.Discord.GuildID) {
 		return errors.New("discord.guild_id must be a Discord snowflake when set")
 	}
 	if c.Discord.Presence.Enabled {
@@ -26,8 +29,8 @@ func (c Config) Validate() error {
 	if c.Seer.BaseURL == "" {
 		return errors.New("seer.base_url is required")
 	}
-	if !isHTTPURL(c.Seer.BaseURL) {
-		return errors.New("seer.base_url must be an absolute http or https URL")
+	if !isSeerBaseURL(c.Seer.BaseURL) {
+		return errors.New("seer.base_url must be an absolute http or https URL without credentials, query parameters, or a fragment")
 	}
 	if c.Seer.APIKey == "" {
 		return errors.New("seer.api_key is required")
@@ -38,8 +41,8 @@ func (c Config) Validate() error {
 	if c.Link.PublicURL == "" {
 		return errors.New("link.public_url is required; set it to the public Seerr URL")
 	}
-	if !isHTTPURL(c.Link.PublicURL) {
-		return errors.New("link.public_url must be an absolute http or https URL")
+	if !isPublicURL(c.Link.PublicURL) {
+		return errors.New("link.public_url must be an absolute http or https URL without credentials or a fragment")
 	}
 	if c.Storage.Path == "" {
 		return errors.New("storage.path is required")
@@ -50,15 +53,41 @@ func (c Config) Validate() error {
 	if c.Health.Enabled && c.Health.Address == "" {
 		return errors.New("health.address is required when health is enabled")
 	}
+	if c.Health.Enabled && !isListenAddress(c.Health.Address) {
+		return errors.New("health.address must be a TCP host:port listen address")
+	}
 	return nil
 }
 
-func isHTTPURL(value string) bool {
+func isSeerBaseURL(value string) bool {
 	parsed, err := url.Parse(value)
 	if err != nil {
 		return false
 	}
-	return parsed.Host != "" && (parsed.Scheme == "http" || parsed.Scheme == "https")
+	return validHTTPURL(parsed) && parsed.RawQuery == "" && !parsed.ForceQuery && parsed.Fragment == ""
+}
+
+func isPublicURL(value string) bool {
+	parsed, err := url.Parse(value)
+	if err != nil {
+		return false
+	}
+	return validHTTPURL(parsed) && parsed.Fragment == ""
+}
+
+func validHTTPURL(parsed *url.URL) bool {
+	return parsed.Hostname() != "" &&
+		(parsed.Scheme == "http" || parsed.Scheme == "https") &&
+		parsed.User == nil
+}
+
+func isListenAddress(address string) bool {
+	host, portText, err := net.SplitHostPort(address)
+	if err != nil || strings.ContainsAny(host, "\t\r\n ") {
+		return false
+	}
+	_, err = strconv.ParseUint(portText, 10, 16)
+	return err == nil
 }
 
 func oneOf(value string, allowed ...string) bool {
@@ -70,8 +99,8 @@ func oneOf(value string, allowed ...string) bool {
 	return false
 }
 
-func isDiscordID(s string) bool {
-	if len(s) < 15 || len(s) > 25 {
+func IsDiscordID(s string) bool {
+	if len(s) < 15 || len(s) > 20 {
 		return false
 	}
 	for _, r := range s {

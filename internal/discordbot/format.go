@@ -2,6 +2,7 @@ package discordbot
 
 import (
 	"fmt"
+	"math"
 	"net/url"
 	"strconv"
 	"strings"
@@ -47,9 +48,9 @@ func interactionUserID(i *discordgo.InteractionCreate) string {
 }
 
 func optionLabel(result seer.SearchResult) string {
-	title := result.Title
+	title := normalizeInlineText(result.Title)
 	if title == "" {
-		title = result.Name
+		title = normalizeInlineText(result.Name)
 	}
 	if title == "" {
 		title = strconv.Itoa(result.ID)
@@ -62,14 +63,60 @@ func optionLabel(result seer.SearchResult) string {
 }
 
 func optionDescription(result seer.SearchResult) string {
-	switch result.MediaType {
+	metadata := []string{mediaTypeLabel(result.MediaType)}
+	if year := releaseYear(result); year != "" {
+		metadata = append(metadata, year)
+	}
+	if language := strings.ToUpper(strings.TrimSpace(result.OriginalLanguage)); language != "" {
+		metadata = append(metadata, language)
+	}
+	if rating := result.VoteAverage; rating > 0 && rating <= 10 && !math.IsNaN(rating) && !math.IsInf(rating, 0) {
+		metadata = append(metadata, fmt.Sprintf("★ %.1f", rating))
+	}
+	if result.MediaInfo != nil {
+		if availability := seer.AvailabilityLabel(result.MediaInfo.Status); availability != "" {
+			metadata = append(metadata, availability)
+		}
+	}
+	description := strings.Join(metadata, " • ")
+	if overview := normalizeInlineText(result.Overview); overview != "" {
+		description += " — " + overview
+	}
+	return description
+}
+
+func mediaTypeLabel(mediaType string) string {
+	switch mediaType {
 	case "movie":
 		return "Movie"
 	case "tv":
 		return "TV show"
 	default:
-		return result.MediaType
+		return mediaType
 	}
+}
+
+func requestSummary(result seer.SearchResult) string {
+	parts := []string{mediaTypeLabel(result.MediaType)}
+	if year := releaseYear(result); year != "" {
+		parts = append(parts, year)
+	}
+	if language := strings.ToUpper(strings.TrimSpace(result.OriginalLanguage)); language != "" {
+		parts = append(parts, language)
+	}
+	if rating := result.VoteAverage; rating > 0 && rating <= 10 && !math.IsNaN(rating) && !math.IsInf(rating, 0) {
+		parts = append(parts, fmt.Sprintf("★ %.1f", rating))
+	}
+	if result.MediaInfo != nil {
+		if availability := seer.AvailabilityLabel(result.MediaInfo.Status); availability != "" {
+			parts = append(parts, availability)
+		}
+	}
+	return strings.Join(parts, " • ")
+}
+
+func normalizeInlineText(value string) string {
+	return strings.Join(strings.Fields(value), " ")
 }
 
 func releaseYear(result seer.SearchResult) string {
@@ -77,7 +124,10 @@ func releaseYear(result seer.SearchResult) string {
 	if date == "" {
 		date = result.FirstAirDate
 	}
-	if len(date) >= 4 {
+	if len(date) >= 4 && date[0] >= '0' && date[0] <= '9' &&
+		date[1] >= '0' && date[1] <= '9' &&
+		date[2] >= '0' && date[2] <= '9' &&
+		date[3] >= '0' && date[3] <= '9' {
 		return date[:4]
 	}
 	return ""
@@ -92,6 +142,17 @@ func truncate(s string, max int) string {
 		return string(runes[:max])
 	}
 	return string(runes[:max-3]) + "..."
+}
+
+func escapeMarkdown(s string) string {
+	return strings.NewReplacer(
+		`\`, `\\`,
+		"`", "\\`",
+		"*", `\*`,
+		"_", `\_`,
+		"~", `\~`,
+		"|", `\|`,
+	).Replace(s)
 }
 
 func intPtr(v int) *int {

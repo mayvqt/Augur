@@ -138,3 +138,39 @@ func TestLoadAppliesHealthEnvironment(t *testing.T) {
 		t.Fatalf("health = %#v, want enabled at 127.0.0.1:9090", cfg.Health)
 	}
 }
+
+func TestDurationRejectsAmbiguousNumericValue(t *testing.T) {
+	t.Parallel()
+	var duration Duration
+	if err := duration.UnmarshalJSON([]byte(`1000000000`)); err == nil {
+		t.Fatal("Duration accepted an ambiguous numeric nanosecond value")
+	}
+}
+
+func TestLoadRejectsDuplicateKeys(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{"discord": {}, "discord": {}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); err == nil {
+		t.Fatal("Load accepted duplicate object keys")
+	}
+}
+
+func TestValidateRejectsAmbiguousOrCredentialedBaseURL(t *testing.T) {
+	t.Parallel()
+	cfg := defaults()
+	cfg.Discord.Token = "token"
+	cfg.Seer.APIKey = "key"
+	cfg.Link.PublicURL = "https://seer.example.test"
+
+	cfg.Seer.BaseURL = "https://seer.example.test?api=v1"
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate accepted a Seerr base URL with a query")
+	}
+	cfg.Seer.BaseURL = "https://user:pass@seer.example.test"
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate accepted credentials embedded in a URL")
+	}
+}
