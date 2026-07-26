@@ -137,11 +137,23 @@ func (b *Bot) handlePick(s interactionSession, i *discordgo.InteractionCreate, d
 		b.logger.Warn("seer quota lookup failed", "discord_id", interactionUserID(i), "error", err)
 	}
 	if result.MediaType != "tv" {
-		b.editPreview(s, i, b.mediaPreview(result, quota), previewComponents(cacheID, key))
+		components := b.browsableComponents(
+			cacheID,
+			key,
+			interactionUserID(i),
+			previewComponents(cacheID, key),
+		)
+		b.editPreview(s, i, b.mediaPreview(result, quota), components)
 		return
 	}
 	if err != nil {
-		b.editPreview(s, i, b.mediaPreview(result, nil), cancelComponents(cacheID))
+		components := b.browsableComponents(
+			cacheID,
+			key,
+			interactionUserID(i),
+			cancelComponents(cacheID),
+		)
+		b.editPreview(s, i, b.mediaPreview(result, nil), components)
 		return
 	}
 	if !b.cache.setQuota(cacheID, key, interactionUserID(i), quota) {
@@ -151,10 +163,23 @@ func (b *Bot) handlePick(s interactionSession, i *discordgo.InteractionCreate, d
 	seasons, err := b.handler.TVSeasons(ctx, result.ID)
 	if err != nil {
 		b.logger.Error("seer TV details failed", "media_id", result.ID, "error", err)
-		b.edit(s, i, "Could not load this show's seasons. Try again in a minute.")
+		embed := b.mediaPreview(result, quota)
+		embed.Footer.Text = "Could not load this show's seasons. Choose another title or try again."
+		components := b.browsableComponents(
+			cacheID,
+			key,
+			interactionUserID(i),
+			cancelComponents(cacheID),
+		)
+		b.editPreview(s, i, embed, components)
 		return
 	}
-	components := seasonPickerComponents(cacheID, key, seasons, quota)
+	components := b.browsableComponents(
+		cacheID,
+		key,
+		interactionUserID(i),
+		seasonPickerComponents(cacheID, key, seasons, quota),
+	)
 	b.editPreview(s, i, b.mediaPreview(result, quota), components)
 }
 
@@ -222,7 +247,13 @@ func (b *Bot) showSeasonConfirmation(
 		Name:  "Selected seasons",
 		Value: seasonSelectionLabel(selection),
 	})
-	b.editPreview(s, i, embed, previewComponents(cacheID, key))
+	components := b.browsableComponents(
+		cacheID,
+		key,
+		interactionUserID(i),
+		previewComponents(cacheID, key),
+	)
+	b.editPreview(s, i, embed, components)
 }
 
 func (b *Bot) handleConfirm(s interactionSession, i *discordgo.InteractionCreate, data discordgo.MessageComponentInteractionData) {
