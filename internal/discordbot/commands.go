@@ -6,6 +6,8 @@ const (
 	commandLink    = "link"
 	commandRequest = "request"
 	componentPick  = "augur:pick:"
+	componentConfirm = "augur:confirm:"
+	componentCancel  = "augur:cancel:"
 )
 
 func slashCommands() []*discordgo.ApplicationCommand {

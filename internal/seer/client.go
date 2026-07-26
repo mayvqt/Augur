@@ -67,6 +67,7 @@ type SearchResult struct {
 	ReleaseDate      string  `json:"releaseDate"`
 	FirstAirDate     string  `json:"firstAirDate"`
 	VoteAverage      float64 `json:"voteAverage"`
+	PosterPath       string  `json:"posterPath"`
 	MediaInfo        *Media  `json:"mediaInfo"`
 }
 

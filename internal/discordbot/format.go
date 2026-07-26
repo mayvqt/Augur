@@ -62,29 +62,6 @@ func optionLabel(result seer.SearchResult) string {
 	return title
 }
 
-func optionDescription(result seer.SearchResult) string {
-	metadata := []string{mediaTypeLabel(result.MediaType)}
-	if year := releaseYear(result); year != "" {
-		metadata = append(metadata, year)
-	}
-	if language := strings.ToUpper(strings.TrimSpace(result.OriginalLanguage)); language != "" {
-		metadata = append(metadata, language)
-	}
-	if rating := result.VoteAverage; rating > 0 && rating <= 10 && !math.IsNaN(rating) && !math.IsInf(rating, 0) {
-		metadata = append(metadata, fmt.Sprintf("★ %.1f", rating))
-	}
-	if result.MediaInfo != nil {
-		if availability := seer.AvailabilityLabel(result.MediaInfo.Status); availability != "" {
-			metadata = append(metadata, availability)
-		}
-	}
-	description := strings.Join(metadata, " • ")
-	if overview := normalizeInlineText(result.Overview); overview != "" {
-		description += " — " + overview
-	}
-	return description
-}
-
 func mediaTypeLabel(mediaType string) string {
 	switch mediaType {
 	case "movie":
@@ -131,6 +108,21 @@ func releaseYear(result seer.SearchResult) string {
 		return date[:4]
 	}
 	return ""
+}
+
+func validRating(rating float64) bool {
+	return rating > 0 && rating <= 10 && !math.IsNaN(rating) && !math.IsInf(rating, 0)
+}
+
+func (b *Bot) mediaURL(result seer.SearchResult) string {
+	u, err := url.Parse(b.link.PublicURL)
+	if err != nil {
+		return ""
+	}
+	u.Path = strings.TrimRight(u.Path, "/") + "/" + result.MediaType + "/" + strconv.Itoa(result.ID)
+	u.RawQuery = ""
+	u.Fragment = ""
+	return u.String()
 }
 
 func truncate(s string, max int) string {

@@ -81,7 +81,11 @@ func (b *Bot) handleRequest(s interactionSession, i *discordgo.InteractionCreate
 		return
 	}
 	b.cache.setMany(cacheID, interactionUserID(i), selections)
+<<<<<<< Updated upstream
 	msg := "Pick the result to request."
+=======
+	msg := "Select a result to preview."
+>>>>>>> Stashed changes
 	_, err = s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
 		Content: &msg,
 		Components: &[]discordgo.MessageComponent{discordgo.ActionsRow{Components: []discordgo.MessageComponent{
@@ -102,32 +106,83 @@ func (b *Bot) handleRequest(s interactionSession, i *discordgo.InteractionCreate
 
 func (b *Bot) handleComponent(s interactionSession, i *discordgo.InteractionCreate) {
 	data := i.MessageComponentData()
-	if !strings.HasPrefix(data.CustomID, componentPick) || len(data.Values) == 0 {
+	switch {
+	case strings.HasPrefix(data.CustomID, componentPick):
+		b.handlePick(s, i, data)
+	case strings.HasPrefix(data.CustomID, componentConfirm):
+		b.handleConfirm(s, i, data)
+	case strings.HasPrefix(data.CustomID, componentCancel):
+		b.handleCancel(s, i, data)
+	}
+}
+
+func (b *Bot) handlePick(s interactionSession, i *discordgo.InteractionCreate, data discordgo.MessageComponentInteractionData) {
+	if len(data.Values) != 1 {
 		return
 	}
-	if !b.deferInteraction(s, i) {
+	if !b.deferComponentUpdate(s, i) {
 		return
 	}
 	cacheID := strings.TrimPrefix(data.CustomID, componentPick)
+<<<<<<< Updated upstream
 	result, ok := b.cache.take(cacheID, data.Values[0], interactionUserID(i))
+=======
+	key := data.Values[0]
+	result, ok := b.cache.get(cacheID, key, interactionUserID(i))
+>>>>>>> Stashed changes
 	if !ok {
 		b.edit(s, i, "That picker expired. Run `/request` again.")
+		return
+	}
+	b.editPreview(s, i, b.mediaPreview(result), previewComponents(cacheID, key))
+}
+
+func (b *Bot) handleConfirm(s interactionSession, i *discordgo.InteractionCreate, data discordgo.MessageComponentInteractionData) {
+	if !b.deferComponentUpdate(s, i) {
+		return
+	}
+	value := strings.TrimPrefix(data.CustomID, componentConfirm)
+	cacheID, key, ok := strings.Cut(value, ":")
+	if !ok || cacheID == "" || key == "" {
+		b.edit(s, i, "That confirmation is invalid. Run `/request` again.")
+		return
+	}
+	result, ok := b.cache.take(cacheID, key, interactionUserID(i))
+	if !ok {
+		b.edit(s, i, "That confirmation expired or was already used. Run `/request` again.")
 		return
 	}
 	ctx, cancel := context.WithTimeout(b.ctx, 30*time.Second)
 	defer cancel()
 	_, err := b.handler.Request(ctx, interactionUserID(i), result)
 	if err != nil {
+<<<<<<< Updated upstream
 		message := "Request failed. Try again in a minute."
 		var userErr interface{ UserMessage() string }
 		if errors.As(err, &userErr) {
 			message = userErr.UserMessage()
 		}
 		b.edit(s, i, truncate(message, 180))
+=======
+		b.edit(s, i, "Request failed: "+truncate(err.Error(), 160))
+>>>>>>> Stashed changes
 		b.logger.Error("request media failed", "discord_id", interactionUserID(i), "media_type", result.MediaType, "media_id", result.ID, "error", err)
 		return
 	}
 	title := escapeMarkdown(optionLabel(result))
+<<<<<<< Updated upstream
 	summary := escapeMarkdown(requestSummary(result))
 	b.edit(s, i, fmt.Sprintf("Requested **%s**\n%s\nI will DM you when it is fully available.", title, summary))
+=======
+	b.edit(s, i, fmt.Sprintf("Requested **%s**.\nI will DM you when it is fully available.", title))
+}
+
+func (b *Bot) handleCancel(s interactionSession, i *discordgo.InteractionCreate, data discordgo.MessageComponentInteractionData) {
+	if !b.deferComponentUpdate(s, i) {
+		return
+	}
+	cacheID := strings.TrimPrefix(data.CustomID, componentCancel)
+	b.cache.discard(cacheID, interactionUserID(i))
+	b.edit(s, i, "Request cancelled.")
+>>>>>>> Stashed changes
 }

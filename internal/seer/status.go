@@ -69,9 +69,9 @@ func mediaStatusCode(status any) int64 {
 		case "deleted":
 			return 7
 		}
-		numeric, err := strconv.Atoi(normalized)
+		numeric, err := strconv.ParseInt(normalized, 10, 64)
 		if err == nil {
-			return int64(numeric)
+			return numeric
 		}
 	case json.Number:
 		numeric, err := v.Int64()
