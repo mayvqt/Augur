@@ -80,16 +80,22 @@ func (b *Bot) browsableComponents(
 			Default: option.key == selectedKey,
 		})
 	}
-	picker := discordgo.ActionsRow{Components: []discordgo.MessageComponent{
+	return append(
+		[]discordgo.MessageComponent{resultPickerRow(cacheID, "Choose another title", options)},
+		components...,
+	)
+}
+
+func resultPickerRow(cacheID, placeholder string, options []discordgo.SelectMenuOption) discordgo.ActionsRow {
+	return discordgo.ActionsRow{Components: []discordgo.MessageComponent{
 		discordgo.SelectMenu{
 			CustomID:    componentPick + cacheID,
-			Placeholder: "Choose another title",
+			Placeholder: placeholder,
 			MinValues:   intPtr(1),
 			MaxValues:   1,
 			Options:     options,
 		},
 	}}
-	return append([]discordgo.MessageComponent{picker}, components...)
 }
 
 func seasonPickerComponents(cacheID, key string, seasons []seer.Season, quota *seer.Quota) []discordgo.MessageComponent {

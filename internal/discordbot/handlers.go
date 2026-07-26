@@ -83,16 +83,8 @@ func (b *Bot) handleRequest(s interactionSession, i *discordgo.InteractionCreate
 	b.cache.setMany(cacheID, interactionUserID(i), selections)
 	msg := "Select a result to preview."
 	_, err = s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
-		Content: &msg,
-		Components: &[]discordgo.MessageComponent{discordgo.ActionsRow{Components: []discordgo.MessageComponent{
-			discordgo.SelectMenu{
-				CustomID:    componentPick + cacheID,
-				Placeholder: "Choose a title",
-				MinValues:   intPtr(1),
-				MaxValues:   1,
-				Options:     options,
-			},
-		}}},
+		Content:         &msg,
+		Components:      &[]discordgo.MessageComponent{resultPickerRow(cacheID, "Choose a title", options)},
 		AllowedMentions: noMentions(),
 	})
 	if err != nil {
@@ -125,38 +117,27 @@ func (b *Bot) handlePick(s interactionSession, i *discordgo.InteractionCreate, d
 	}
 	cacheID := strings.TrimPrefix(data.CustomID, componentPick)
 	key := data.Values[0]
-	result, ok := b.cache.get(cacheID, key, interactionUserID(i))
+	ownerID := interactionUserID(i)
+	result, ok := b.cache.get(cacheID, key, ownerID)
 	if !ok {
 		b.edit(s, i, "That picker expired. Run `/request` again.")
 		return
 	}
 	ctx, cancel := context.WithTimeout(b.ctx, 20*time.Second)
 	defer cancel()
-	quota, err := b.handler.Quota(ctx, interactionUserID(i))
+	quota, err := b.handler.Quota(ctx, ownerID)
 	if err != nil {
-		b.logger.Warn("seer quota lookup failed", "discord_id", interactionUserID(i), "error", err)
+		b.logger.Warn("seer quota lookup failed", "discord_id", ownerID, "error", err)
 	}
 	if result.MediaType != "tv" {
-		components := b.browsableComponents(
-			cacheID,
-			key,
-			interactionUserID(i),
-			previewComponents(cacheID, key),
-		)
-		b.editPreview(s, i, b.mediaPreview(result, quota), components)
+		b.editBrowsablePreview(s, i, cacheID, key, b.mediaPreview(result, quota), previewComponents(cacheID, key))
 		return
 	}
 	if err != nil {
-		components := b.browsableComponents(
-			cacheID,
-			key,
-			interactionUserID(i),
-			cancelComponents(cacheID),
-		)
-		b.editPreview(s, i, b.mediaPreview(result, nil), components)
+		b.editBrowsablePreview(s, i, cacheID, key, b.mediaPreview(result, nil), cancelComponents(cacheID))
 		return
 	}
-	if !b.cache.setQuota(cacheID, key, interactionUserID(i), quota) {
+	if !b.cache.setQuota(cacheID, key, ownerID, quota) {
 		b.edit(s, i, "That picker expired. Run `/request` again.")
 		return
 	}
@@ -165,22 +146,17 @@ func (b *Bot) handlePick(s interactionSession, i *discordgo.InteractionCreate, d
 		b.logger.Error("seer TV details failed", "media_id", result.ID, "error", err)
 		embed := b.mediaPreview(result, quota)
 		embed.Footer.Text = "Could not load this show's seasons. Choose another title or try again."
-		components := b.browsableComponents(
-			cacheID,
-			key,
-			interactionUserID(i),
-			cancelComponents(cacheID),
-		)
-		b.editPreview(s, i, embed, components)
+		b.editBrowsablePreview(s, i, cacheID, key, embed, cancelComponents(cacheID))
 		return
 	}
-	components := b.browsableComponents(
+	b.editBrowsablePreview(
+		s,
+		i,
 		cacheID,
 		key,
-		interactionUserID(i),
+		b.mediaPreview(result, quota),
 		seasonPickerComponents(cacheID, key, seasons, quota),
 	)
-	b.editPreview(s, i, b.mediaPreview(result, quota), components)
 }
 
 func (b *Bot) handleSeasons(s interactionSession, i *discordgo.InteractionCreate, data discordgo.MessageComponentInteractionData) {
@@ -247,12 +223,25 @@ func (b *Bot) showSeasonConfirmation(
 		Name:  "Selected seasons",
 		Value: seasonSelectionLabel(selection),
 	})
-	components := b.browsableComponents(
+	b.editBrowsablePreview(
+		s,
+		i,
 		cacheID,
 		key,
-		interactionUserID(i),
+		embed,
 		previewComponents(cacheID, key),
 	)
+}
+
+func (b *Bot) editBrowsablePreview(
+	s interactionSession,
+	i *discordgo.InteractionCreate,
+	cacheID string,
+	selectedKey string,
+	embed *discordgo.MessageEmbed,
+	components []discordgo.MessageComponent,
+) {
+	components = b.browsableComponents(cacheID, selectedKey, interactionUserID(i), components)
 	b.editPreview(s, i, embed, components)
 }
 
