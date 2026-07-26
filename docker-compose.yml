@@ -4,6 +4,11 @@ services:
     build: .
     container_name: augur
     restart: unless-stopped
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp
     env_file:
       - path: .env
         required: false

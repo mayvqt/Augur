@@ -8,7 +8,7 @@
   <Privileged>false</Privileged>
   <Support>https://github.com/mayvqt/Augur/issues</Support>
   <Project>https://github.com/mayvqt/Augur</Project>
-  <Overview>Discord request bot for Seerr with account linking, fuzzy search, dropdown requests, and completion DMs.</Overview>
+  <Overview>Discord request bot for Seerr with account linking, media previews, request limits, and completion DMs.</Overview>
   <Category>MediaApp:Other Network:Other</Category>
   <TemplateURL>https://raw.githubusercontent.com/mayvqt/Augur/main/unraid/augur.xml</TemplateURL>
   <ExtraParams>--restart=unless-stopped --init --tmpfs /tmp --security-opt=no-new-privileges:true</ExtraParams>
