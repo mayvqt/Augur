@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"sync/atomic"
 	"time"
 
 	"github.com/mayvqt/Augur/internal/config"
@@ -14,14 +15,15 @@ import (
 
 type healthServer struct {
 	cfg     config.HealthConfig
-	store   watchStore
+	store   subscriptionStore
 	metrics *Metrics
 	logger  *slog.Logger
 	server  *http.Server
 	ln      net.Listener
+	ready   atomic.Bool
 }
 
-func newHealthServer(cfg config.HealthConfig, store watchStore, metrics *Metrics, logger *slog.Logger) *healthServer {
+func newHealthServer(cfg config.HealthConfig, store subscriptionStore, metrics *Metrics, logger *slog.Logger) *healthServer {
 	mux := http.NewServeMux()
 	server := &healthServer{cfg: cfg, store: store, metrics: metrics, logger: logger}
 	mux.HandleFunc("/healthz", server.healthz)
@@ -31,6 +33,9 @@ func newHealthServer(cfg config.HealthConfig, store watchStore, metrics *Metrics
 		Addr:              cfg.Address,
 		Handler:           mux,
 		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       5 * time.Second,
+		WriteTimeout:      5 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
 	return server
 }
@@ -59,11 +64,27 @@ func (s *healthServer) Close(ctx context.Context) error {
 	return s.server.Shutdown(shutdownCtx)
 }
 
-func (s *healthServer) healthz(w http.ResponseWriter, _ *http.Request) {
+func (s *healthServer) SetReady(ready bool) {
+	if s != nil {
+		s.ready.Store(ready)
+	}
+}
+
+func (s *healthServer) healthz(w http.ResponseWriter, r *http.Request) {
+	if !requireGET(w, r) {
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 func (s *healthServer) readyz(w http.ResponseWriter, r *http.Request) {
+	if !requireGET(w, r) {
+		return
+	}
+	if !s.ready.Load() {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "not_ready"})
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 	defer cancel()
 	if err := s.store.Ping(ctx); err != nil {
@@ -73,12 +94,25 @@ func (s *healthServer) readyz(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ready"})
 }
 
-func (s *healthServer) metricsz(w http.ResponseWriter, _ *http.Request) {
+func (s *healthServer) metricsz(w http.ResponseWriter, r *http.Request) {
+	if !requireGET(w, r) {
+		return
+	}
 	writeJSON(w, http.StatusOK, s.metrics.Snapshot())
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(value)
+}
+
+func requireGET(w http.ResponseWriter, r *http.Request) bool {
+	if r.Method == http.MethodGet {
+		return true
+	}
+	w.Header().Set("Allow", http.MethodGet)
+	writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"status": "method_not_allowed"})
+	return false
 }

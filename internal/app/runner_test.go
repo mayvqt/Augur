@@ -63,6 +63,7 @@ func TestValidateSearchResult(t *testing.T) {
 		{name: "tv", result: seer.SearchResult{ID: 1, MediaType: "tv"}},
 		{name: "missing id", result: seer.SearchResult{MediaType: "movie"}, wantErr: "missing an ID"},
 		{name: "unsupported type", result: seer.SearchResult{ID: 1, MediaType: "music"}, wantErr: "unsupported media type"},
+		{name: "already available", result: seer.SearchResult{ID: 1, MediaType: "movie", MediaInfo: &seer.Media{Status: 5}}, wantErr: "already fully available"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -84,13 +85,13 @@ func TestRunnerRequestRequiresLinkedUser(t *testing.T) {
 	t.Parallel()
 	runner := newTestRunner(testConfig(), &fakeSeer{}, &fakeStore{}, &fakeNotifier{})
 
-	_, err := runner.Request(context.Background(), "123", seer.SearchResult{ID: 9, MediaType: "movie", Title: "Arrival"})
+	_, err := runner.Request(context.Background(), "123456789012345678", seer.SearchResult{ID: 9, MediaType: "movie", Title: "Arrival"})
 	if err == nil || !strings.Contains(err.Error(), "not linked") {
 		t.Fatalf("Request() error = %v, want linked account error", err)
 	}
 }
 
-func TestRunnerRequestAddsWatch(t *testing.T) {
+func TestRunnerRequestAddsSubscription(t *testing.T) {
 	t.Parallel()
 	seerClient := &fakeSeer{
 		user:  seer.User{ID: 7},
@@ -102,7 +103,7 @@ func TestRunnerRequestAddsWatch(t *testing.T) {
 	store := &fakeStore{}
 	runner := newTestRunner(testConfig(), seerClient, store, &fakeNotifier{})
 
-	req, err := runner.Request(context.Background(), " 123 ", seer.SearchResult{ID: 9, MediaType: "movie", Title: "Arrival"})
+	req, err := runner.Request(context.Background(), " 123456789012345678 ", seer.SearchResult{ID: 9, MediaType: "movie", Title: "Arrival"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,17 +111,31 @@ func TestRunnerRequestAddsWatch(t *testing.T) {
 		t.Fatalf("request ID = %d, want 44", req.ID)
 	}
 	if len(store.added) != 1 {
-		t.Fatalf("added watches = %d, want 1", len(store.added))
+		t.Fatalf("added subscriptions = %d, want 1", len(store.added))
 	}
-	if store.added[0].DiscordID != "123" || store.added[0].Title != "Arrival" {
-		t.Fatalf("watch = %#v, want trimmed Discord ID and title", store.added[0])
+	if store.added[0].DiscordID != "123456789012345678" || store.added[0].Title != "Arrival" {
+		t.Fatalf("subscription = %#v, want trimmed Discord ID and title", store.added[0])
 	}
 }
 
-func TestRunnerRequestSkipsDuplicateOpenWatch(t *testing.T) {
+func TestRunnerRejectsRequestWithoutSeerrID(t *testing.T) {
 	t.Parallel()
-	store := &fakeStore{openByID: map[int]storage.Watch{
-		44: {RequestID: 44, DiscordID: "123", Title: "Arrival", MediaType: "movie"},
+	runner := newTestRunner(testConfig(), &fakeSeer{
+		user:  seer.User{ID: 7},
+		found: true,
+	}, &fakeStore{}, &fakeNotifier{})
+
+	if _, err := runner.Request(context.Background(), "123456789012345678", seer.SearchResult{
+		ID: 9, MediaType: "movie", Title: "Arrival",
+	}); err == nil || !strings.Contains(err.Error(), "valid ID") {
+		t.Fatalf("Request() error = %v, want missing Seerr request ID", err)
+	}
+}
+
+func TestRunnerRequestSkipsDuplicateSubscription(t *testing.T) {
+	t.Parallel()
+	store := &fakeStore{pendingByID: map[int]storage.Subscription{
+		44: {RequestID: 44, DiscordID: "123456789012345678", Title: "Arrival", MediaType: "movie"},
 	}}
 	runner := newTestRunner(testConfig(), &fakeSeer{
 		user:           seer.User{ID: 7},
@@ -128,20 +143,20 @@ func TestRunnerRequestSkipsDuplicateOpenWatch(t *testing.T) {
 		createdRequest: seer.Request{ID: 44},
 	}, store, &fakeNotifier{})
 
-	if _, err := runner.Request(context.Background(), "123", seer.SearchResult{ID: 9, MediaType: "movie", Title: "Arrival"}); err != nil {
+	if _, err := runner.Request(context.Background(), "123456789012345678", seer.SearchResult{ID: 9, MediaType: "movie", Title: "Arrival"}); err != nil {
 		t.Fatal(err)
 	}
 	if len(store.added) != 0 {
-		t.Fatalf("added duplicate watch count = %d, want 0", len(store.added))
+		t.Fatalf("added duplicate subscription count = %d, want 0", len(store.added))
 	}
-	if got := runner.metrics.Snapshot()["duplicate_watches"]; got != 1 {
-		t.Fatalf("duplicate_watches = %d, want 1", got)
+	if got := runner.metrics.Snapshot()["duplicate_subscriptions"]; got != 1 {
+		t.Fatalf("duplicate_subscriptions = %d, want 1", got)
 	}
 }
 
-func TestRunnerCheckWatchesRetriesAndNotifies(t *testing.T) {
+func TestRunnerChecksSubscriptionsRetriesAndNotifies(t *testing.T) {
 	t.Parallel()
-	store := &fakeStore{open: []storage.Watch{{RequestID: 44, DiscordID: "123", Title: "Arrival", MediaType: "movie"}}}
+	store := &fakeStore{pending: []storage.Subscription{{RequestID: 44, DiscordID: "123456789012345678", Title: "Arrival", MediaType: "movie"}}}
 	notifier := &fakeNotifier{}
 	seerClient := &fakeSeer{
 		requestFailures: 1,
@@ -151,17 +166,37 @@ func TestRunnerCheckWatchesRetriesAndNotifies(t *testing.T) {
 	}
 	runner := newTestRunner(testConfig(), seerClient, store, notifier)
 
-	runner.checkWatches(context.Background())
+	runner.checkSubscriptions(context.Background())
 
 	if len(store.completed) != 1 {
-		t.Fatalf("completed watches = %d, want 1", len(store.completed))
+		t.Fatalf("completed subscriptions = %d, want 1", len(store.completed))
 	}
 	if len(notifier.notifications) != 1 {
 		t.Fatalf("notifications = %d, want 1", len(notifier.notifications))
 	}
 	snapshot := runner.metrics.Snapshot()
-	if snapshot["completed_watches"] != 1 || snapshot["transient_seer_failures"] != 1 {
+	if snapshot["completed_subscriptions"] != 1 || snapshot["transient_seer_failures"] != 1 {
 		t.Fatalf("metrics = %#v, want completed and retry counters", snapshot)
+	}
+}
+
+func TestRunnerKeepsSubscriptionPendingWhenNotificationFails(t *testing.T) {
+	t.Parallel()
+	store := &fakeStore{pending: []storage.Subscription{{
+		RequestID: 44, DiscordID: "123456789012345678", Title: "Arrival", MediaType: "movie",
+	}}}
+	notifier := &fakeNotifier{notifyErr: errors.New("Discord unavailable")}
+	runner := newTestRunner(testConfig(), &fakeSeer{requestByID: map[int]seer.Request{
+		44: {ID: 44, Media: &seer.Media{Status: "available"}},
+	}}, store, notifier)
+
+	runner.checkSubscriptions(context.Background())
+
+	if len(store.completed) != 0 {
+		t.Fatalf("completed subscriptions = %d, want failed notification to remain pending", len(store.completed))
+	}
+	if got := runner.metrics.Snapshot()["notification_failures"]; got != 1 {
+		t.Fatalf("notification_failures = %d, want 1", got)
 	}
 }
 
@@ -171,6 +206,7 @@ func TestHealthHandlers(t *testing.T) {
 	metrics := &Metrics{}
 	metrics.searches.Add(3)
 	server := newHealthServer(config.HealthConfig{Enabled: true, Address: "127.0.0.1:0"}, store, metrics, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	server.SetReady(true)
 
 	ready := httptest.NewRecorder()
 	server.readyz(ready, httptest.NewRequest(http.MethodGet, "/readyz", nil))
@@ -182,5 +218,26 @@ func TestHealthHandlers(t *testing.T) {
 	server.metricsz(metricsResponse, httptest.NewRequest(http.MethodGet, "/metrics", nil))
 	if !strings.Contains(metricsResponse.Body.String(), `"searches":3`) {
 		t.Fatalf("metrics response = %s, want searches counter", metricsResponse.Body.String())
+	}
+}
+
+func TestReadinessRequiresStartedRunnerAndGET(t *testing.T) {
+	t.Parallel()
+	server := newHealthServer(
+		config.HealthConfig{Enabled: true, Address: "127.0.0.1:0"},
+		&fakeStore{},
+		&Metrics{},
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+	)
+	notReady := httptest.NewRecorder()
+	server.readyz(notReady, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+	if notReady.Code != http.StatusServiceUnavailable {
+		t.Fatalf("readiness before startup = %d, want 503", notReady.Code)
+	}
+
+	method := httptest.NewRecorder()
+	server.healthz(method, httptest.NewRequest(http.MethodPost, "/healthz", nil))
+	if method.Code != http.StatusMethodNotAllowed || method.Header().Get("Allow") != http.MethodGet {
+		t.Fatalf("POST health response = %d Allow %q, want 405 and GET", method.Code, method.Header().Get("Allow"))
 	}
 }

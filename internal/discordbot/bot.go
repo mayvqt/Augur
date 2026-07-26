@@ -2,6 +2,7 @@ package discordbot
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 
 	"github.com/mayvqt/Augur/internal/config"
@@ -31,6 +32,12 @@ type Bot struct {
 }
 
 func New(cfg config.DiscordConfig, link config.LinkConfig, handler Handler, logger *slog.Logger) (*Bot, error) {
+	if handler == nil {
+		return nil, errors.New("handler is required")
+	}
+	if logger == nil {
+		logger = slog.Default()
+	}
 	session, err := discordgo.New("Bot " + cfg.Token)
 	if err != nil {
 		return nil, err

@@ -3,6 +3,8 @@ package discordbot
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -16,30 +18,36 @@ type selectionCache struct {
 
 type cachedSelection struct {
 	result    seer.SearchResult
+	ownerID   string
 	expiresAt time.Time
 }
 
-func (c *selectionCache) setMany(cacheID string, results map[string]seer.SearchResult) {
+func (c *selectionCache) setMany(cacheID, ownerID string, results map[string]seer.SearchResult) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.initLocked()
 	expiresAt := time.Now().Add(15 * time.Minute)
 	for key, result := range results {
-		c.items[cacheKey(cacheID, key)] = cachedSelection{result: result, expiresAt: expiresAt}
+		c.items[cacheKey(cacheID, key)] = cachedSelection{result: result, ownerID: ownerID, expiresAt: expiresAt}
 	}
 	c.pruneLocked()
 }
 
-func (c *selectionCache) get(cacheID, key string) (seer.SearchResult, bool) {
+func (c *selectionCache) take(cacheID, key, ownerID string) (seer.SearchResult, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.initLocked()
 	item, ok := c.items[cacheKey(cacheID, key)]
-	if !ok || time.Now().After(item.expiresAt) {
-		if ok {
+	if !ok || item.ownerID != ownerID || !time.Now().Before(item.expiresAt) {
+		if ok && item.ownerID == ownerID {
 			delete(c.items, cacheKey(cacheID, key))
 		}
 		return seer.SearchResult{}, false
+	}
+	for itemKey, candidate := range c.items {
+		if candidate.ownerID == ownerID && strings.HasPrefix(itemKey, cacheID+":") {
+			delete(c.items, itemKey)
+		}
 	}
 	return item.result, true
 }
@@ -63,10 +71,10 @@ func cacheKey(cacheID, key string) string {
 	return cacheID + ":" + key
 }
 
-func randomID() string {
-	var data [8]byte
+func randomID() (string, error) {
+	var data [16]byte
 	if _, err := rand.Read(data[:]); err != nil {
-		return hex.EncodeToString([]byte(time.Now().Format(time.RFC3339Nano)))
+		return "", fmt.Errorf("generate secure selection ID: %w", err)
 	}
-	return hex.EncodeToString(data[:])
+	return hex.EncodeToString(data[:]), nil
 }

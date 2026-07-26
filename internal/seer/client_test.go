@@ -19,6 +19,10 @@ func TestIsAvailable(t *testing.T) {
 	}{
 		{name: "string available", req: Request{Media: &Media{Status: "AVAILABLE"}}, want: true},
 		{name: "numeric available", req: Request{Media: &Media{Status: float64(5)}}, want: true},
+		{name: "json number available", req: Request{Media: &Media{Status: json.Number("5")}}, want: true},
+		{name: "partial string", req: Request{Media: &Media{Status: "PARTIALLY_AVAILABLE"}}, want: false},
+		{name: "partial numeric", req: Request{Media: &Media{Status: float64(4)}}, want: false},
+		{name: "fractional status", req: Request{Media: &Media{Status: float64(5.5)}}, want: false},
 		{name: "pending", req: Request{Media: &Media{Status: float64(2)}}, want: false},
 		{name: "missing media", req: Request{}, want: false},
 	}
@@ -32,9 +36,26 @@ func TestIsAvailable(t *testing.T) {
 	}
 }
 
+func TestAvailabilityLabel(t *testing.T) {
+	t.Parallel()
+	tests := map[any]string{
+		json.Number("2"):      "Pending",
+		float64(3):            "Processing",
+		"PARTIALLY_AVAILABLE": "Partially available",
+		"available":           "Available",
+		6:                     "Blocklisted",
+		7:                     "Deleted",
+	}
+	for status, want := range tests {
+		if got := AvailabilityLabel(status); got != want {
+			t.Fatalf("AvailabilityLabel(%v) = %q, want %q", status, got, want)
+		}
+	}
+}
+
 func TestFindUserByDiscordIDUsesNotificationSettings(t *testing.T) {
 	t.Parallel()
-	client := New(Config{BaseURL: "http://seerr.test", APIKey: "key", Timeout: time.Second})
+	client := newTestClient(t)
 	client.httpClient = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		switch r.URL.Path {
 		case "/api/v1/user":
@@ -65,10 +86,40 @@ func TestFindUserByDiscordIDUsesNotificationSettings(t *testing.T) {
 	}
 }
 
+func TestSearchDecodesAndDeduplicatesMediaMetadata(t *testing.T) {
+	t.Parallel()
+	client := newTestClient(t)
+	client.httpClient = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return jsonResponse(t, map[string]any{"results": []map[string]any{
+			{
+				"id": 42, "mediaType": "movie", "title": "The Thing",
+				"overview": "Antarctic horror", "originalLanguage": "en",
+				"releaseDate": "1982-06-25", "voteAverage": 8.1,
+				"mediaInfo": map[string]any{"status": 3},
+			},
+			{"id": 42, "mediaType": "movie", "title": "Duplicate"},
+			{"id": 99, "mediaType": "person", "name": "Not media"},
+		}}), nil
+	})}
+
+	results, err := client.Search(context.Background(), "thing")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("Search() results = %#v, want one deduplicated media result", results)
+	}
+	got := results[0]
+	if got.Overview != "Antarctic horror" || got.OriginalLanguage != "en" || got.VoteAverage != 8.1 ||
+		got.MediaInfo == nil || AvailabilityLabel(got.MediaInfo.Status) != "Processing" {
+		t.Fatalf("Search() metadata = %#v", got)
+	}
+}
+
 func TestRequestMediaUsesSeerrUserIDAndAllSeasons(t *testing.T) {
 	t.Parallel()
 	var got map[string]any
-	client := New(Config{BaseURL: "http://seerr.test", APIKey: "key", Timeout: time.Second})
+	client := newTestClient(t)
 	client.httpClient = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		if r.URL.Path != "/api/v1/request" {
 			return notFoundResponse(), nil
@@ -102,7 +153,7 @@ func TestRequestMediaUsesSeerrUserIDAndAllSeasons(t *testing.T) {
 
 func TestRequestMediaValidatesInputBeforeHTTP(t *testing.T) {
 	t.Parallel()
-	client := New(Config{BaseURL: "http://seerr.test", APIKey: "key", Timeout: time.Second})
+	client := newTestClient(t)
 	client.httpClient = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		t.Fatalf("unexpected HTTP request to %s", r.URL.String())
 		return nil, nil
@@ -114,11 +165,26 @@ func TestRequestMediaValidatesInputBeforeHTTP(t *testing.T) {
 	if _, err := client.RequestMedia(context.Background(), 0, "movie", 0); err == nil {
 		t.Fatal("RequestMedia accepted missing media ID")
 	}
+	if _, err := client.RequestMedia(context.Background(), -1, "movie", 1); err == nil {
+		t.Fatal("RequestMedia accepted a negative user ID")
+	}
+}
+
+func TestRequestRejectsMismatchedResponseID(t *testing.T) {
+	t.Parallel()
+	client := newTestClient(t)
+	client.httpClient = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return jsonResponse(t, map[string]any{"id": 99, "media": map[string]any{"status": 5}}), nil
+	})}
+
+	if _, err := client.Request(context.Background(), 44); err == nil || !strings.Contains(err.Error(), "expected 44") {
+		t.Fatalf("Request() error = %v, want mismatched ID error", err)
+	}
 }
 
 func TestClientMethodsValidateIdentifiersBeforeHTTP(t *testing.T) {
 	t.Parallel()
-	client := New(Config{BaseURL: "http://seerr.test", APIKey: "key", Timeout: time.Second})
+	client := newTestClient(t)
 	client.httpClient = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		t.Fatalf("unexpected HTTP request to %s", r.URL.String())
 		return nil, nil
@@ -140,7 +206,7 @@ func TestClientMethodsValidateIdentifiersBeforeHTTP(t *testing.T) {
 
 func TestDoWrapsInvalidJSONWithEndpoint(t *testing.T) {
 	t.Parallel()
-	client := New(Config{BaseURL: "http://seerr.test", APIKey: "key", Timeout: time.Second})
+	client := newTestClient(t)
 	client.httpClient = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		return &http.Response{
 			StatusCode: 200,
@@ -156,7 +222,7 @@ func TestDoWrapsInvalidJSONWithEndpoint(t *testing.T) {
 
 func TestDoLimitsErrorResponseSnippet(t *testing.T) {
 	t.Parallel()
-	client := New(Config{BaseURL: "http://seerr.test", APIKey: "key", Timeout: time.Second})
+	client := newTestClient(t)
 	client.httpClient = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		return &http.Response{
 			StatusCode: 500,
@@ -203,7 +269,7 @@ func TestIsRetryable(t *testing.T) {
 
 func TestDoRejectsOversizedResponses(t *testing.T) {
 	t.Parallel()
-	client := New(Config{BaseURL: "http://seerr.test", APIKey: "key", Timeout: time.Second})
+	client := newTestClient(t)
 	client.httpClient = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		return &http.Response{
 			StatusCode: 200,
@@ -217,7 +283,61 @@ func TestDoRejectsOversizedResponses(t *testing.T) {
 	}
 }
 
+func TestNewValidatesConfiguration(t *testing.T) {
+	t.Parallel()
+	tests := []Config{
+		{BaseURL: "not-a-url", APIKey: "key", Timeout: time.Second},
+		{BaseURL: "https://user:pass@seerr.test", APIKey: "key", Timeout: time.Second},
+		{BaseURL: "https://seerr.test?query=1", APIKey: "key", Timeout: time.Second},
+		{BaseURL: "https://seerr.test", Timeout: time.Second},
+		{BaseURL: "https://seerr.test", APIKey: "key"},
+	}
+	for _, cfg := range tests {
+		if _, err := New(cfg); err == nil {
+			t.Fatalf("New(%#v) accepted invalid configuration", cfg)
+		}
+	}
+}
+
+func TestClientDoesNotForwardAPIKeyThroughRedirect(t *testing.T) {
+	t.Parallel()
+	var redirected bool
+	client, err := New(Config{BaseURL: "http://seerr.test", APIKey: "secret", Timeout: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.httpClient.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Host == "attacker.test" {
+			redirected = true
+			if r.Header.Get("X-Api-Key") != "" {
+				t.Error("redirect target received Seerr API key")
+			}
+			return jsonResponse(t, map[string]any{"results": []any{}}), nil
+		}
+		return &http.Response{
+			StatusCode: http.StatusFound,
+			Header:     http.Header{"Location": []string{"http://attacker.test/stolen"}},
+			Body:       io.NopCloser(strings.NewReader("redirect")),
+		}, nil
+	})
+	if _, err := client.Search(context.Background(), "arrival"); err == nil {
+		t.Fatal("Search accepted a redirect response")
+	}
+	if redirected {
+		t.Fatal("client followed a redirect")
+	}
+}
+
 type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func newTestClient(t *testing.T) *Client {
+	t.Helper()
+	client, err := New(Config{BaseURL: "http://seerr.test", APIKey: "key", Timeout: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return client
+}
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {
 	return f(r)

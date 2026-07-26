@@ -17,7 +17,7 @@ import (
 type Runner struct {
 	cfg       config.Config
 	seer      seerClient
-	store     watchStore
+	store     subscriptionStore
 	bot       notifier
 	health    *healthServer
 	metrics   *Metrics
@@ -34,6 +34,9 @@ type Runner struct {
 }
 
 func New(cfg config.Config, logger *slog.Logger) (*Runner, error) {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	cfg.Normalize()
 	if err := cfg.Validate(); err != nil {
 		return nil, err
@@ -42,11 +45,15 @@ func New(cfg config.Config, logger *slog.Logger) (*Runner, error) {
 	if err != nil {
 		return nil, err
 	}
-	client := seer.New(seer.Config{
+	client, err := seer.New(seer.Config{
 		BaseURL: cfg.Seer.BaseURL,
 		APIKey:  cfg.Seer.APIKey,
 		Timeout: cfg.Seer.Timeout.Duration(),
 	})
+	if err != nil {
+		_ = store.Close()
+		return nil, err
+	}
 	runner := &Runner{cfg: cfg, seer: client, store: store, logger: logger}
 	bot, err := discordbot.New(cfg.Discord, cfg.Link, runner, logger)
 	if err != nil {
@@ -61,7 +68,10 @@ func New(cfg config.Config, logger *slog.Logger) (*Runner, error) {
 	return runner, nil
 }
 
-func newWithDeps(cfg config.Config, seer seerClient, store watchStore, bot notifier, logger *slog.Logger) *Runner {
+func newWithDeps(cfg config.Config, seer seerClient, store subscriptionStore, bot notifier, logger *slog.Logger) *Runner {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	cfg.Normalize()
 	metrics := &Metrics{}
 	runner := &Runner{cfg: cfg, seer: seer, store: store, bot: bot, logger: logger, metrics: metrics}
@@ -92,6 +102,9 @@ func (r *Runner) Run(ctx context.Context) error {
 
 	defer func() {
 		cancel()
+		if r.health != nil {
+			r.health.SetReady(false)
+		}
 		r.mu.Lock()
 		r.running = false
 		r.closed = true
@@ -106,17 +119,17 @@ func (r *Runner) Run(ctx context.Context) error {
 		}
 	}
 	if err := r.bot.Start(runCtx); err != nil {
-		if runCtx.Err() != nil {
-			return nil
-		}
 		return fmt.Errorf("start Discord session: %w", err)
 	}
 	r.mu.Lock()
 	r.started = true
 	r.mu.Unlock()
+	if r.health != nil {
+		r.health.SetReady(true)
+	}
 
 	r.wg.Add(1)
-	go r.runWatcher(runCtx)
+	go r.runMonitor(runCtx)
 
 	<-runCtx.Done()
 	r.logger.Info("shutdown requested")

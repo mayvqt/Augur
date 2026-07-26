@@ -2,6 +2,7 @@ package discordbot
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -23,6 +24,10 @@ func (b *Bot) handleCommand(s interactionSession, i *discordgo.InteractionCreate
 
 func (b *Bot) handleLink(s interactionSession, i *discordgo.InteractionCreate) {
 	userID := interactionUserID(i)
+	if userID == "" {
+		b.ephemeral(s, i, "Discord did not provide your user ID. Try again.")
+		return
+	}
 	linkURL := b.linkURL(userID)
 	content := fmt.Sprintf("Open your Seerr Discord notification settings and paste your Discord ID64.\nDiscord ID64: `%s`\nURL: %s", userID, linkURL)
 	data := &discordgo.InteractionResponseData{
@@ -54,7 +59,12 @@ func (b *Bot) handleRequest(s interactionSession, i *discordgo.InteractionCreate
 		return
 	}
 	options := make([]discordgo.SelectMenuOption, 0, 25)
-	cacheID := randomID()
+	cacheID, err := randomID()
+	if err != nil {
+		b.edit(s, i, "Could not create a secure result picker. Try again.")
+		b.logger.Error("generate result picker ID", "error", err)
+		return
+	}
 	selections := make(map[string]seer.SearchResult, 25)
 	for _, result := range results {
 		if len(options) == 25 {
@@ -70,7 +80,7 @@ func (b *Bot) handleRequest(s interactionSession, i *discordgo.InteractionCreate
 		b.edit(s, i, "No movies or shows matched that search.")
 		return
 	}
-	b.cache.setMany(cacheID, selections)
+	b.cache.setMany(cacheID, interactionUserID(i), selections)
 	msg := "Pick the result to request."
 	_, err = s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
 		Content: &msg,
@@ -99,22 +109,25 @@ func (b *Bot) handleComponent(s interactionSession, i *discordgo.InteractionCrea
 		return
 	}
 	cacheID := strings.TrimPrefix(data.CustomID, componentPick)
-	result, ok := b.cache.get(cacheID, data.Values[0])
+	result, ok := b.cache.take(cacheID, data.Values[0], interactionUserID(i))
 	if !ok {
 		b.edit(s, i, "That picker expired. Run `/request` again.")
 		return
 	}
 	ctx, cancel := context.WithTimeout(b.ctx, 30*time.Second)
 	defer cancel()
-	req, err := b.handler.Request(ctx, interactionUserID(i), result)
+	_, err := b.handler.Request(ctx, interactionUserID(i), result)
 	if err != nil {
-		b.edit(s, i, "Request failed: "+truncate(err.Error(), 160))
+		message := "Request failed. Try again in a minute."
+		var userErr interface{ UserMessage() string }
+		if errors.As(err, &userErr) {
+			message = userErr.UserMessage()
+		}
+		b.edit(s, i, truncate(message, 180))
+		b.logger.Error("request media failed", "discord_id", interactionUserID(i), "media_type", result.MediaType, "media_id", result.ID, "error", err)
 		return
 	}
-	title := optionLabel(result)
-	if req.ID > 0 {
-		b.edit(s, i, fmt.Sprintf("Requested **%s**. I will DM you when it is available.", title))
-		return
-	}
-	b.edit(s, i, fmt.Sprintf("Requested **%s**.", title))
+	title := escapeMarkdown(optionLabel(result))
+	summary := escapeMarkdown(requestSummary(result))
+	b.edit(s, i, fmt.Sprintf("Requested **%s**\n%s\nI will DM you when it is fully available.", title, summary))
 }

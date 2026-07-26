@@ -1,5 +1,6 @@
 #!/bin/sh
 set -eu
+umask 077
 
 PUID="${PUID:-99}"
 PGID="${PGID:-100}"
@@ -36,17 +37,21 @@ if [ "$(id -u)" = "0" ]; then
 
   mkdir -p "$CONFIG_DIR" "$STORAGE_DIR"
   if [ ! -e "$CONFIG_PATH" ]; then
-    cp /app/config.docker.json "$CONFIG_PATH"
+    cp /app/config.example.json "$CONFIG_PATH"
   fi
   chown augur:augur "$CONFIG_DIR" "$STORAGE_DIR" "$CONFIG_PATH"
+  chmod 0600 "$CONFIG_PATH"
   if [ -e "$STORAGE_PATH" ]; then
     chown augur:augur "$STORAGE_PATH"
+    chmod 0600 "$STORAGE_PATH"
   fi
   if [ -e "$STORAGE_PATH-wal" ]; then
     chown augur:augur "$STORAGE_PATH-wal"
+    chmod 0600 "$STORAGE_PATH-wal"
   fi
   if [ -e "$STORAGE_PATH-shm" ]; then
     chown augur:augur "$STORAGE_PATH-shm"
+    chmod 0600 "$STORAGE_PATH-shm"
   fi
 
   if [ "${1:-}" != "" ] && [ "${1#-}" != "$1" ]; then

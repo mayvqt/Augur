@@ -7,6 +7,7 @@ import (
 	"github.com/bwmarrin/discordgo"
 
 	"github.com/mayvqt/Augur/internal/config"
+	"github.com/mayvqt/Augur/internal/seer"
 )
 
 func TestLinkURLUsesDiscordNotificationSettings(t *testing.T) {
@@ -37,6 +38,30 @@ func TestTruncateIsUnicodeSafeAndHonorsLimit(t *testing.T) {
 	}
 	if len([]rune(got)) > 17 {
 		t.Fatalf("truncate() returned %d runes, want <= 17", len([]rune(got)))
+	}
+}
+
+func TestSearchOptionIncludesUsefulMediaMetadata(t *testing.T) {
+	t.Parallel()
+	result := seer.SearchResult{
+		ID:               42,
+		MediaType:        "movie",
+		Title:            "  The\nThing ",
+		Overview:         "A research team finds\nsomething terrible in Antarctica.",
+		OriginalLanguage: "en",
+		ReleaseDate:      "1982-06-25",
+		VoteAverage:      8.1,
+		MediaInfo:        &seer.Media{Status: 3},
+	}
+	if got := optionLabel(result); got != "The Thing (1982)" {
+		t.Fatalf("optionLabel() = %q", got)
+	}
+	wantDescription := "Movie • 1982 • EN • ★ 8.1 • Processing — A research team finds something terrible in Antarctica."
+	if got := optionDescription(result); got != wantDescription {
+		t.Fatalf("optionDescription() = %q, want %q", got, wantDescription)
+	}
+	if got := requestSummary(result); got != "Movie • 1982 • EN • ★ 8.1 • Processing" {
+		t.Fatalf("requestSummary() = %q", got)
 	}
 }
 

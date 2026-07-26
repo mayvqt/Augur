@@ -38,4 +38,4 @@ go run ./cmd/augur -config config.json
 - `/link`: replies privately with the user's Discord ID64 and a Seerr settings link.
 - `/request`: searches Seerr, shows up to 25 movie/show matches, and submits the selected request.
 
-Augur watches submitted requests and DMs the requester when Seerr reports the media as available.
+Augur monitors submitted requests and DMs the requester when Seerr reports the media as available.

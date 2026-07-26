@@ -28,21 +28,21 @@ func applyEnvironment(cfg *Config) error {
 	}
 
 	if value, ok := os.LookupEnv("AUGUR_LINK_REQUIRE_MATCH"); ok {
-		parsed, err := strconv.ParseBool(value)
+		parsed, err := strconv.ParseBool(strings.TrimSpace(value))
 		if err != nil {
 			return fmt.Errorf("AUGUR_LINK_REQUIRE_MATCH must be true or false: %w", err)
 		}
 		cfg.Link.RequireMatch = parsed
 	}
 	if value, ok := os.LookupEnv("AUGUR_WORKER_POLL_INTERVAL"); ok {
-		parsed, err := time.ParseDuration(value)
+		parsed, err := time.ParseDuration(strings.TrimSpace(value))
 		if err != nil {
 			return fmt.Errorf("AUGUR_WORKER_POLL_INTERVAL must be a duration: %w", err)
 		}
 		cfg.Worker.PollInterval = Duration(parsed)
 	}
 	if value, ok := os.LookupEnv("AUGUR_HEALTH_ENABLED"); ok {
-		parsed, err := strconv.ParseBool(value)
+		parsed, err := strconv.ParseBool(strings.TrimSpace(value))
 		if err != nil {
 			return fmt.Errorf("AUGUR_HEALTH_ENABLED must be true or false: %w", err)
 		}

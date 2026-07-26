@@ -2,23 +2,33 @@ package discordbot
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/bwmarrin/discordgo"
 )
 
 func (b *Bot) Start(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	b.ctx = ctx
 	b.session.Identify.Intents = discordgo.IntentsGuilds | discordgo.IntentsDirectMessages
 	if err := b.session.Open(); err != nil {
 		return err
 	}
+	if err := ctx.Err(); err != nil {
+		return errors.Join(err, b.session.Close())
+	}
 	if err := b.applyPresence(); err != nil {
 		b.logger.Error("discord presence update failed", "error", err)
 	}
+	if err := ctx.Err(); err != nil {
+		return errors.Join(err, b.session.Close())
+	}
 	_, err := b.session.ApplicationCommandBulkOverwrite(b.session.State.User.ID, b.cfg.GuildID, slashCommands())
 	if err != nil {
-		return err
+		return errors.Join(err, b.session.Close())
 	}
 	b.logger.Info("discord slash commands registered", "guild_id", b.cfg.GuildID)
 	return nil
@@ -30,11 +40,20 @@ func (b *Bot) Close() error {
 }
 
 func (b *Bot) NotifyComplete(ctx context.Context, discordID, title string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	channel, err := b.session.UserChannelCreate(discordID)
 	if err != nil {
 		return err
 	}
-	_, err = b.session.ChannelMessageSend(channel.ID, fmt.Sprintf("Your request for **%s** is now available.", title))
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	_, err = b.session.ChannelMessageSendComplex(channel.ID, &discordgo.MessageSend{
+		Content:         fmt.Sprintf("Your request for **%s** is now available.", escapeMarkdown(title)),
+		AllowedMentions: noMentions(),
+	})
 	return err
 }
 

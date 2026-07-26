@@ -29,11 +29,11 @@ The container stores config and the SQLite database under `/data`.
 | Path | Purpose |
 | --- | --- |
 | `cmd/augur` | Process startup, config loading, and signal handling. |
-| `internal/app` | Runtime wiring, request creation, watch polling, and shutdown. |
+| `internal/app` | Runtime wiring, request creation, subscription monitoring, and shutdown. |
 | `internal/config` | Config file parsing, environment overrides, and validation. |
 | `internal/discordbot` | Discord slash commands, interactions, DMs, presence, and selection cache. |
 | `internal/seer` | Seerr API client. |
-| `internal/storage` | SQLite persistence for watched requests. |
+| `internal/storage` | SQLite persistence for subscriptions. |
 
 ## Notes
 

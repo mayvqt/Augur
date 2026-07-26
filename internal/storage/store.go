@@ -11,7 +11,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-type Watch struct {
+type Subscription struct {
 	RequestID   int       `json:"request_id"`
 	DiscordID   string    `json:"discord_id"`
 	Title       string    `json:"title"`
@@ -21,8 +21,7 @@ type Watch struct {
 }
 
 type Store struct {
-	path string
-	db   *sql.DB
+	db *sql.DB
 }
 
 func Open(path string) (*Store, error) {
@@ -40,7 +39,7 @@ func Open(path string) (*Store, error) {
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
 
-	store := &Store{path: dbPath, db: db}
+	store := &Store{db: db}
 	if err := store.initialize(context.Background()); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -68,112 +67,99 @@ func (s *Store) Ping(ctx context.Context) error {
 	return nil
 }
 
-func (s *Store) AddWatch(ctx context.Context, watch Watch) error {
+func (s *Store) AddSubscription(ctx context.Context, subscription Subscription) (bool, error) {
+	if s == nil || s.db == nil {
+		return false, errors.New("storage is not open")
+	}
 	if err := ctx.Err(); err != nil {
-		return err
+		return false, err
 	}
-	watch.DiscordID = strings.TrimSpace(watch.DiscordID)
-	watch.Title = strings.TrimSpace(watch.Title)
-	watch.MediaType = strings.TrimSpace(watch.MediaType)
-	if watch.RequestID <= 0 {
-		return errors.New("request_id must be positive")
+	subscription.DiscordID = strings.TrimSpace(subscription.DiscordID)
+	subscription.Title = strings.TrimSpace(subscription.Title)
+	subscription.MediaType = strings.TrimSpace(subscription.MediaType)
+	if subscription.RequestID <= 0 {
+		return false, errors.New("request_id must be positive")
 	}
-	if watch.DiscordID == "" {
-		return errors.New("discord_id is required")
+	if subscription.DiscordID == "" {
+		return false, errors.New("discord_id is required")
 	}
-	if watch.Title == "" {
-		return errors.New("title is required")
+	if subscription.Title == "" {
+		return false, errors.New("title is required")
 	}
-	if watch.MediaType != "movie" && watch.MediaType != "tv" {
-		return errors.New("media_type must be movie or tv")
+	if subscription.MediaType != "movie" && subscription.MediaType != "tv" {
+		return false, errors.New("media_type must be movie or tv")
 	}
-	createdAt := watch.CreatedAt.UTC()
+	createdAt := subscription.CreatedAt.UTC()
 	if createdAt.IsZero() {
 		createdAt = time.Now().UTC()
 	}
-	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO watches (request_id, discord_id, title, media_type, created_at, completed_at)
-		VALUES (?, ?, ?, ?, ?, NULLIF(?, ''))
-		ON CONFLICT(request_id) DO UPDATE SET
-			discord_id = excluded.discord_id,
-			title = excluded.title,
-			media_type = excluded.media_type,
-			created_at = excluded.created_at,
-			completed_at = COALESCE(excluded.completed_at, watches.completed_at)
-	`, watch.RequestID, watch.DiscordID, watch.Title, watch.MediaType, formatTime(createdAt), formatNullableTime(watch.CompletedAt))
-	if err != nil {
-		return fmt.Errorf("upsert watch: %w", err)
+	if !subscription.CompletedAt.IsZero() && subscription.CompletedAt.Before(createdAt) {
+		return false, errors.New("completed_at must not be before created_at")
 	}
-	return nil
+	result, err := s.db.ExecContext(ctx, `
+		INSERT INTO subscriptions (request_id, discord_id, title, media_type, created_at, completed_at)
+		VALUES (?, ?, ?, ?, ?, NULLIF(?, ''))
+		ON CONFLICT(request_id, discord_id) DO NOTHING
+	`, subscription.RequestID, subscription.DiscordID, subscription.Title, subscription.MediaType, formatTime(createdAt), formatNullableTime(subscription.CompletedAt))
+	if err != nil {
+		return false, fmt.Errorf("insert subscription: %w", err)
+	}
+	inserted, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("inspect inserted subscription: %w", err)
+	}
+	return inserted == 1, nil
 }
 
-func (s *Store) OpenWatches(ctx context.Context) ([]Watch, error) {
+func (s *Store) PendingSubscriptions(ctx context.Context) ([]Subscription, error) {
+	if s == nil || s.db == nil {
+		return nil, errors.New("storage is not open")
+	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT request_id, discord_id, title, media_type, created_at, completed_at
-		FROM watches
+		FROM subscriptions
 		WHERE completed_at IS NULL
 		ORDER BY created_at, request_id
 	`)
 	if err != nil {
-		return nil, fmt.Errorf("list open watches: %w", err)
+		return nil, fmt.Errorf("list open subscriptions: %w", err)
 	}
 	defer rows.Close()
-	return scanWatches(rows)
+	return scanSubscriptions(rows)
 }
 
-func (s *Store) OpenWatch(ctx context.Context, requestID int) (Watch, bool, error) {
+func (s *Store) CompleteSubscription(ctx context.Context, requestID int, discordID string, completedAt time.Time) (Subscription, bool, error) {
+	if s == nil || s.db == nil {
+		return Subscription{}, false, errors.New("storage is not open")
+	}
 	if err := ctx.Err(); err != nil {
-		return Watch{}, false, err
+		return Subscription{}, false, err
 	}
 	if requestID <= 0 {
-		return Watch{}, false, errors.New("request_id must be positive")
+		return Subscription{}, false, errors.New("request_id must be positive")
 	}
-	row := s.db.QueryRowContext(ctx, `
-		SELECT request_id, discord_id, title, media_type, created_at, completed_at
-		FROM watches
-		WHERE request_id = ? AND completed_at IS NULL
-	`, requestID)
-	return scanOptionalWatch(row)
-}
-
-func (s *Store) CompleteWatch(ctx context.Context, requestID int, completedAt time.Time) (Watch, bool, error) {
-	if err := ctx.Err(); err != nil {
-		return Watch{}, false, err
-	}
-	if requestID <= 0 {
-		return Watch{}, false, errors.New("request_id must be positive")
+	discordID = strings.TrimSpace(discordID)
+	if discordID == "" {
+		return Subscription{}, false, errors.New("discord_id is required")
 	}
 	completedAt = completedAt.UTC()
 	if completedAt.IsZero() {
 		completedAt = time.Now().UTC()
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return Watch{}, false, fmt.Errorf("begin complete watch: %w", err)
-	}
-	defer func() {
-		_ = tx.Rollback()
-	}()
-
-	watch, ok, err := selectOpenWatch(ctx, tx, requestID)
-	if err != nil || !ok {
-		return Watch{}, ok, err
-	}
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE watches
+	row := s.db.QueryRowContext(ctx, `
+		UPDATE subscriptions
 		SET completed_at = ?
-		WHERE request_id = ? AND completed_at IS NULL
-	`, formatTime(completedAt), requestID); err != nil {
-		return Watch{}, false, fmt.Errorf("complete watch: %w", err)
+		WHERE request_id = ? AND discord_id = ? AND completed_at IS NULL
+		RETURNING request_id, discord_id, title, media_type, created_at, completed_at
+	`, formatTime(completedAt), requestID, discordID)
+	subscription, ok, err := scanOptionalSubscription(row)
+	if err != nil {
+		return Subscription{}, false, fmt.Errorf("complete subscription: %w", err)
 	}
-	if err := tx.Commit(); err != nil {
-		return Watch{}, false, fmt.Errorf("commit complete watch: %w", err)
-	}
-	watch.CompletedAt = completedAt
-	return watch, true, nil
+	return subscription, ok, nil
 }
 
 func (s *Store) initialize(ctx context.Context) error {
@@ -189,16 +175,22 @@ func (s *Store) initialize(ctx context.Context) error {
 		}
 	}
 	if _, err := s.db.ExecContext(ctx, `
-		CREATE TABLE IF NOT EXISTS watches (
-			request_id INTEGER PRIMARY KEY,
+		CREATE TABLE IF NOT EXISTS subscriptions (
+			request_id INTEGER NOT NULL,
 			discord_id TEXT NOT NULL,
 			title TEXT NOT NULL,
 			media_type TEXT NOT NULL,
 			created_at TEXT NOT NULL,
-			completed_at TEXT
+			completed_at TEXT,
+			PRIMARY KEY (request_id, discord_id),
+			CHECK (request_id > 0),
+			CHECK (length(discord_id) > 0),
+			CHECK (length(title) > 0),
+			CHECK (media_type IN ('movie', 'tv')),
+			CHECK (completed_at IS NULL OR julianday(completed_at) >= julianday(created_at))
 		);
-		CREATE INDEX IF NOT EXISTS idx_watches_open_created
-			ON watches(completed_at, created_at, request_id);
+		CREATE INDEX IF NOT EXISTS idx_subscriptions_open_created
+			ON subscriptions(completed_at, created_at, request_id);
 	`); err != nil {
 		return fmt.Errorf("initialize schema: %w", err)
 	}

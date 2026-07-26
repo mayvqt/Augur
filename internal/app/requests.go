@@ -7,9 +7,22 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mayvqt/Augur/internal/config"
 	"github.com/mayvqt/Augur/internal/seer"
 	"github.com/mayvqt/Augur/internal/storage"
 )
+
+type userFacingError struct {
+	message string
+}
+
+func (e *userFacingError) Error() string {
+	return e.message
+}
+
+func (e *userFacingError) UserMessage() string {
+	return e.message
+}
 
 func (r *Runner) Search(ctx context.Context, query string) ([]seer.SearchResult, error) {
 	r.metrics.searches.Add(1)
@@ -27,9 +40,17 @@ func (r *Runner) Request(ctx context.Context, discordID string, result seer.Sear
 		r.metrics.requestFailures.Add(1)
 		return seer.Request{}, errors.New("discord user ID is required")
 	}
+	if !config.IsDiscordID(discordID) {
+		r.metrics.requestFailures.Add(1)
+		return seer.Request{}, errors.New("discord user ID is invalid")
+	}
 	if err := validateSearchResult(result); err != nil {
 		r.metrics.requestFailures.Add(1)
 		return seer.Request{}, err
+	}
+	if err := r.store.Ping(ctx); err != nil {
+		r.metrics.requestFailures.Add(1)
+		return seer.Request{}, fmt.Errorf("storage is unavailable: %w", err)
 	}
 	var seerUserID int
 	if r.cfg.Link.RequireMatch {
@@ -40,7 +61,7 @@ func (r *Runner) Request(ctx context.Context, discordID string, result seer.Sear
 		}
 		if !ok {
 			r.metrics.requestFailures.Add(1)
-			return seer.Request{}, errors.New("your Discord account is not linked in Seerr yet")
+			return seer.Request{}, &userFacingError{message: "Your Discord account is not linked in Seerr yet. Run `/link` first."}
 		}
 		seerUserID = user.ID
 	}
@@ -49,34 +70,33 @@ func (r *Runner) Request(ctx context.Context, discordID string, result seer.Sear
 		r.metrics.requestFailures.Add(1)
 		return seer.Request{}, err
 	}
-	if req.ID > 0 {
-		if _, ok, err := r.store.OpenWatch(ctx, req.ID); err != nil {
-			r.metrics.requestFailures.Add(1)
-			return seer.Request{}, err
-		} else if ok {
-			r.metrics.duplicateWatches.Add(1)
-			return req, nil
-		}
-		if err := r.store.AddWatch(ctx, storage.Watch{
-			RequestID: req.ID,
-			DiscordID: discordID,
-			Title:     displayTitle(result),
-			MediaType: result.MediaType,
-			CreatedAt: time.Now().UTC(),
-		}); err != nil {
-			r.metrics.requestFailures.Add(1)
-			return seer.Request{}, err
-		}
+	if req.ID <= 0 {
+		r.metrics.requestFailures.Add(1)
+		return seer.Request{}, errors.New("Seerr returned a request without a valid ID")
+	}
+	inserted, err := r.store.AddSubscription(ctx, storage.Subscription{
+		RequestID: req.ID,
+		DiscordID: discordID,
+		Title:     displayTitle(result),
+		MediaType: result.MediaType,
+		CreatedAt: time.Now().UTC(),
+	})
+	if err != nil {
+		r.metrics.requestFailures.Add(1)
+		return seer.Request{}, err
+	}
+	if !inserted {
+		r.metrics.duplicateSubscriptions.Add(1)
 	}
 	return req, nil
 }
 
 func displayTitle(result seer.SearchResult) string {
-	if result.Title != "" {
-		return result.Title
+	if title := strings.TrimSpace(result.Title); title != "" {
+		return title
 	}
-	if result.Name != "" {
-		return result.Name
+	if name := strings.TrimSpace(result.Name); name != "" {
+		return name
 	}
 	return fmt.Sprintf("%s %d", result.MediaType, result.ID)
 }
@@ -87,6 +107,9 @@ func validateSearchResult(result seer.SearchResult) error {
 	}
 	switch result.MediaType {
 	case "movie", "tv":
+		if result.MediaInfo != nil && seer.IsMediaAvailable(result.MediaInfo.Status) {
+			return &userFacingError{message: "That title is already fully available in Seerr."}
+		}
 		return nil
 	default:
 		return fmt.Errorf("unsupported media type %q", result.MediaType)

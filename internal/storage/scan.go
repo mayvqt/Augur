@@ -1,75 +1,60 @@
 package storage
 
 import (
-	"context"
 	"database/sql"
 	"errors"
 	"fmt"
 	"strings"
 )
 
-func selectOpenWatch(ctx context.Context, tx *sql.Tx, requestID int) (Watch, bool, error) {
-	row := tx.QueryRowContext(ctx, `
-		SELECT request_id, discord_id, title, media_type, created_at, completed_at
-		FROM watches
-		WHERE request_id = ? AND completed_at IS NULL
-	`, requestID)
-	watch, err := scanWatch(row)
-	return optionalScannedWatch(watch, err)
-}
-
-func scanWatches(rows *sql.Rows) ([]Watch, error) {
-	watches := make([]Watch, 0)
+func scanSubscriptions(rows *sql.Rows) ([]Subscription, error) {
+	subscriptions := make([]Subscription, 0)
 	for rows.Next() {
-		watch, err := scanWatch(rows)
+		subscription, err := scanSubscription(rows)
 		if err != nil {
 			return nil, err
 		}
-		watches = append(watches, watch)
+		subscriptions = append(subscriptions, subscription)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate watches: %w", err)
+		return nil, fmt.Errorf("iterate subscriptions: %w", err)
 	}
-	return watches, nil
+	return subscriptions, nil
 }
 
-type watchScanner interface {
+type subscriptionScanner interface {
 	Scan(dest ...any) error
 }
 
-func scanWatch(scanner watchScanner) (Watch, error) {
-	var watch Watch
+func scanSubscription(scanner subscriptionScanner) (Subscription, error) {
+	var subscription Subscription
 	var createdAt string
 	var completedAt sql.NullString
-	if err := scanner.Scan(&watch.RequestID, &watch.DiscordID, &watch.Title, &watch.MediaType, &createdAt, &completedAt); err != nil {
-		return Watch{}, err
+	if err := scanner.Scan(&subscription.RequestID, &subscription.DiscordID, &subscription.Title, &subscription.MediaType, &createdAt, &completedAt); err != nil {
+		return Subscription{}, err
 	}
 	parsedCreatedAt, err := parseTime(createdAt)
 	if err != nil {
-		return Watch{}, fmt.Errorf("parse created_at for watch %d: %w", watch.RequestID, err)
+		return Subscription{}, fmt.Errorf("parse created_at for subscription %d: %w", subscription.RequestID, err)
 	}
-	watch.CreatedAt = parsedCreatedAt
+	subscription.CreatedAt = parsedCreatedAt
 	if completedAt.Valid && strings.TrimSpace(completedAt.String) != "" {
 		parsedCompletedAt, err := parseTime(completedAt.String)
 		if err != nil {
-			return Watch{}, fmt.Errorf("parse completed_at for watch %d: %w", watch.RequestID, err)
+			return Subscription{}, fmt.Errorf("parse completed_at for subscription %d: %w", subscription.RequestID, err)
 		}
-		watch.CompletedAt = parsedCompletedAt
+		subscription.CompletedAt = parsedCompletedAt
 	}
-	return watch, nil
+	return subscription, nil
 }
 
-func scanOptionalWatch(scanner watchScanner) (Watch, bool, error) {
-	watch, err := scanWatch(scanner)
-	return optionalScannedWatch(watch, err)
-}
-
-func optionalScannedWatch(watch Watch, err error) (Watch, bool, error) {
+func scanOptionalSubscription(scanner subscriptionScanner) (Subscription, bool, error) {
+	subscription, err := scanSubscription(scanner)
 	if errors.Is(err, sql.ErrNoRows) {
-		return Watch{}, false, nil
+		return Subscription{}, false, nil
 	}
 	if err != nil {
-		return Watch{}, false, err
+		return Subscription{}, false, err
 	}
-	return watch, true, nil
+	return subscription, true, nil
 }

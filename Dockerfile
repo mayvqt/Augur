@@ -20,7 +20,7 @@ RUN apk add --no-cache ca-certificates shadow su-exec tzdata \
     && chown -R augur:augur /data /app
 WORKDIR /app
 COPY --from=build /out/augur /usr/local/bin/augur
-COPY config.docker.json /app/config.docker.json
+COPY config.example.json /app/config.example.json
 COPY --chmod=755 docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 ENV AUGUR_CONFIG=/data/config.json \
     AUGUR_STORAGE_PATH=/data/augur-state.db \

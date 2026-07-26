@@ -15,11 +15,10 @@ type seerClient interface {
 	Request(ctx context.Context, id int) (seer.Request, error)
 }
 
-type watchStore interface {
-	AddWatch(ctx context.Context, watch storage.Watch) error
-	OpenWatch(ctx context.Context, requestID int) (storage.Watch, bool, error)
-	OpenWatches(ctx context.Context) ([]storage.Watch, error)
-	CompleteWatch(ctx context.Context, requestID int, completedAt time.Time) (storage.Watch, bool, error)
+type subscriptionStore interface {
+	AddSubscription(ctx context.Context, subscription storage.Subscription) (bool, error)
+	PendingSubscriptions(ctx context.Context) ([]storage.Subscription, error)
+	CompleteSubscription(ctx context.Context, requestID int, discordID string, completedAt time.Time) (storage.Subscription, bool, error)
 	Ping(ctx context.Context) error
 	Close() error
 }
