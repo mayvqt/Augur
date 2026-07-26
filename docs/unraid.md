@@ -17,14 +17,11 @@ Open **Docker → Add Container**, select **Augur**, and provide:
 The container creates `/data/config.json` and `/data/augur-state.db`
 automatically. The default Unraid user and group IDs are `99` and `100`.
 
-Set a guild ID while testing for immediate slash-command updates. Leave it empty
-to register commands globally.
+Set a guild ID while testing for immediate slash-command updates. Leave it empty to register commands globally.
 
 ## Troubleshooting
 
-- Missing commands: invite the bot with `applications.commands`, set a guild ID,
-  and restart Augur.
+- Missing commands: invite the bot with `applications.commands`, set a guild ID, and restart Augur.
 - Incorrect `/link` URL: check the public Seerr URL.
-- Account not linked: add the Discord ID64 shown by `/link` to the user's Seerr
-  Discord notification settings.
+- Account not linked: add the Discord ID64 shown by `/link` to the user's Seerr Discord notification settings.
 - Missing completion DM: allow direct messages from server members.

@@ -15,5 +15,4 @@ Build and run the container with:
 docker compose up --build
 ```
 
-Code lives under `internal/`, grouped by application workflow, configuration,
-Discord, Seerr, and SQLite storage.
+Code lives under `internal/`, grouped by application workflow, configuration, Discord, Seerr, and SQLite storage.

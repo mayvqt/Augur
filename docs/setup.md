@@ -15,14 +15,13 @@ Augur needs a Discord bot token, a Seerr API key, and URLs for reaching Seerr.
 2. Choose the internal Seerr URL Augur can reach.
 3. Choose the public Seerr URL users open in their browser.
 
-The `/link` command directs users to Seerr's Discord notification settings, where
-they add their Discord ID64. Linked users can then search and submit requests with
+The `/link` command directs users to Seerr's Discord notification settings, where they add their Discord ID64. Linked
+users can then search and submit requests with
 `/request`.
 
 ## Docker
 
-Set the [required environment variables](configuration.md#required-environment-variables),
-then start Augur:
+Set the [required environment variables](configuration.md#required-environment-variables), then start Augur:
 
 ```bash
 docker compose up -d

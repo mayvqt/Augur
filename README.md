@@ -3,8 +3,8 @@
 Augur is a lightweight Discord bot for requesting movies and TV shows through
 [Seerr](https://github.com/seerr-team/seerr).
 
-Users can link their Seerr account, search with `/request`, review media details
-before submitting, and receive a DM when their request becomes available.
+Users can link their Seerr account, search with `/request`, review media details before submitting, and receive a DM
+when their request becomes available.
 
 ## Documentation
 
@@ -15,8 +15,7 @@ before submitting, and receive a DM when their request becomes available.
 
 ## Run with Docker
 
-Set the [required environment variables](docs/configuration.md#required-environment-variables),
-then run:
+Set the [required environment variables](docs/configuration.md#required-environment-variables), then run:
 
 ```bash
 docker compose up -d
