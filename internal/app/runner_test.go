@@ -85,7 +85,7 @@ func TestRunnerRequestRequiresLinkedUser(t *testing.T) {
 	t.Parallel()
 	runner := newTestRunner(testConfig(), &fakeSeer{}, &fakeStore{}, &fakeNotifier{})
 
-	_, err := runner.Request(context.Background(), "123456789012345678", seer.SearchResult{ID: 9, MediaType: "movie", Title: "Arrival"})
+	_, err := runner.Request(context.Background(), "123456789012345678", seer.SearchResult{ID: 9, MediaType: "movie", Title: "Arrival"}, seer.SeasonSelection{})
 	if err == nil || !strings.Contains(err.Error(), "not linked") {
 		t.Fatalf("Request() error = %v, want linked account error", err)
 	}
@@ -103,7 +103,7 @@ func TestRunnerRequestAddsSubscription(t *testing.T) {
 	store := &fakeStore{}
 	runner := newTestRunner(testConfig(), seerClient, store, &fakeNotifier{})
 
-	req, err := runner.Request(context.Background(), " 123456789012345678 ", seer.SearchResult{ID: 9, MediaType: "movie", Title: "Arrival"})
+	req, err := runner.Request(context.Background(), " 123456789012345678 ", seer.SearchResult{ID: 9, MediaType: "movie", Title: "Arrival"}, seer.SeasonSelection{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +127,7 @@ func TestRunnerRejectsRequestWithoutSeerrID(t *testing.T) {
 
 	if _, err := runner.Request(context.Background(), "123456789012345678", seer.SearchResult{
 		ID: 9, MediaType: "movie", Title: "Arrival",
-	}); err == nil || !strings.Contains(err.Error(), "valid ID") {
+	}, seer.SeasonSelection{}); err == nil || !strings.Contains(err.Error(), "valid ID") {
 		t.Fatalf("Request() error = %v, want missing Seerr request ID", err)
 	}
 }
@@ -143,7 +143,7 @@ func TestRunnerRequestSkipsDuplicateSubscription(t *testing.T) {
 		createdRequest: seer.Request{ID: 44},
 	}, store, &fakeNotifier{})
 
-	if _, err := runner.Request(context.Background(), "123456789012345678", seer.SearchResult{ID: 9, MediaType: "movie", Title: "Arrival"}); err != nil {
+	if _, err := runner.Request(context.Background(), "123456789012345678", seer.SearchResult{ID: 9, MediaType: "movie", Title: "Arrival"}, seer.SeasonSelection{}); err != nil {
 		t.Fatal(err)
 	}
 	if len(store.added) != 0 {
@@ -151,6 +151,64 @@ func TestRunnerRequestSkipsDuplicateSubscription(t *testing.T) {
 	}
 	if got := runner.metrics.Snapshot()["duplicate_subscriptions"]; got != 1 {
 		t.Fatalf("duplicate_subscriptions = %d, want 1", got)
+	}
+}
+
+func TestRunnerTVRequestEnforcesRemainingSeasonQuota(t *testing.T) {
+	t.Parallel()
+	seerClient := &fakeSeer{
+		user:  seer.User{ID: 7},
+		found: true,
+		quota: seer.Quota{TV: seer.QuotaUsage{Restricted: true, Remaining: 3}},
+		tvDetails: seer.TVDetails{Seasons: []seer.Season{
+			{SeasonNumber: 1}, {SeasonNumber: 2}, {SeasonNumber: 3}, {SeasonNumber: 4},
+		}},
+		createdRequest: seer.Request{ID: 44},
+	}
+	runner := newTestRunner(testConfig(), seerClient, &fakeStore{}, &fakeNotifier{})
+	result := seer.SearchResult{ID: 9, MediaType: "tv", Name: "Example"}
+
+	if _, err := runner.Request(
+		context.Background(),
+		"123456789012345678",
+		result,
+		seer.SeasonSelection{Numbers: []int{1, 2, 3, 4}},
+	); err == nil || !strings.Contains(err.Error(), "3 more") {
+		t.Fatalf("Request() error = %v, want remaining-season quota error", err)
+	}
+	if _, err := runner.Request(
+		context.Background(),
+		"123456789012345678",
+		result,
+		seer.SeasonSelection{All: true},
+	); err == nil || !strings.Contains(err.Error(), "unlimited") {
+		t.Fatalf("Request() error = %v, want unlimited quota error", err)
+	}
+}
+
+func TestRunnerTVRequestSubmitsSelectedSeasons(t *testing.T) {
+	t.Parallel()
+	seerClient := &fakeSeer{
+		user:  seer.User{ID: 7},
+		found: true,
+		quota: seer.Quota{TV: seer.QuotaUsage{Restricted: true, Remaining: 3}},
+		tvDetails: seer.TVDetails{Seasons: []seer.Season{
+			{SeasonNumber: 1}, {SeasonNumber: 2}, {SeasonNumber: 3},
+		}},
+		createdRequest: seer.Request{ID: 44},
+	}
+	runner := newTestRunner(testConfig(), seerClient, &fakeStore{}, &fakeNotifier{})
+
+	if _, err := runner.Request(
+		context.Background(),
+		"123456789012345678",
+		seer.SearchResult{ID: 9, MediaType: "tv", Name: "Example"},
+		seer.SeasonSelection{Numbers: []int{3, 1}},
+	); err != nil {
+		t.Fatal(err)
+	}
+	if got := seerClient.requestedSeasons.Numbers; len(got) != 2 || got[0] != 1 || got[1] != 3 {
+		t.Fatalf("requested seasons = %#v, want [1 3]", got)
 	}
 }
 

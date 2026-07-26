@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -104,6 +105,10 @@ func (b *Bot) handleComponent(s interactionSession, i *discordgo.InteractionCrea
 	switch {
 	case strings.HasPrefix(data.CustomID, componentPick):
 		b.handlePick(s, i, data)
+	case strings.HasPrefix(data.CustomID, componentSeasons):
+		b.handleSeasons(s, i, data)
+	case strings.HasPrefix(data.CustomID, componentAll):
+		b.handleAllSeasons(s, i, data)
 	case strings.HasPrefix(data.CustomID, componentConfirm):
 		b.handleConfirm(s, i, data)
 	case strings.HasPrefix(data.CustomID, componentCancel):
@@ -131,7 +136,93 @@ func (b *Bot) handlePick(s interactionSession, i *discordgo.InteractionCreate, d
 	if err != nil {
 		b.logger.Warn("seer quota lookup failed", "discord_id", interactionUserID(i), "error", err)
 	}
-	b.editPreview(s, i, b.mediaPreview(result, quota), previewComponents(cacheID, key))
+	if result.MediaType != "tv" {
+		b.editPreview(s, i, b.mediaPreview(result, quota), previewComponents(cacheID, key))
+		return
+	}
+	if err != nil {
+		b.editPreview(s, i, b.mediaPreview(result, nil), cancelComponents(cacheID))
+		return
+	}
+	if !b.cache.setQuota(cacheID, key, interactionUserID(i), quota) {
+		b.edit(s, i, "That picker expired. Run `/request` again.")
+		return
+	}
+	seasons, err := b.handler.TVSeasons(ctx, result.ID)
+	if err != nil {
+		b.logger.Error("seer TV details failed", "media_id", result.ID, "error", err)
+		b.edit(s, i, "Could not load this show's seasons. Try again in a minute.")
+		return
+	}
+	components := seasonPickerComponents(cacheID, key, seasons, quota)
+	b.editPreview(s, i, b.mediaPreview(result, quota), components)
+}
+
+func (b *Bot) handleSeasons(s interactionSession, i *discordgo.InteractionCreate, data discordgo.MessageComponentInteractionData) {
+	if len(data.Values) == 0 {
+		return
+	}
+	if !b.deferComponentUpdate(s, i) {
+		return
+	}
+	value := strings.TrimPrefix(data.CustomID, componentSeasons)
+	cacheID, key, ok := strings.Cut(value, ":")
+	if !ok || cacheID == "" || key == "" {
+		b.edit(s, i, "That season picker is invalid. Run `/request` again.")
+		return
+	}
+	selection, err := parseSeasonValues(data.Values)
+	if err != nil {
+		b.edit(s, i, err.Error())
+		return
+	}
+	b.showSeasonConfirmation(s, i, cacheID, key, selection)
+}
+
+func (b *Bot) handleAllSeasons(s interactionSession, i *discordgo.InteractionCreate, data discordgo.MessageComponentInteractionData) {
+	if !b.deferComponentUpdate(s, i) {
+		return
+	}
+	value := strings.TrimPrefix(data.CustomID, componentAll)
+	cacheID, key, ok := strings.Cut(value, ":")
+	if !ok || cacheID == "" || key == "" {
+		b.edit(s, i, "That season selection is invalid. Run `/request` again.")
+		return
+	}
+	b.showSeasonConfirmation(s, i, cacheID, key, seer.SeasonSelection{All: true})
+}
+
+func (b *Bot) showSeasonConfirmation(
+	s interactionSession,
+	i *discordgo.InteractionCreate,
+	cacheID string,
+	key string,
+	selection seer.SeasonSelection,
+) {
+	result, ok := b.cache.get(cacheID, key, interactionUserID(i))
+	if !ok || result.MediaType != "tv" {
+		b.edit(s, i, "That season picker expired. Run `/request` again.")
+		return
+	}
+	quota, ok := b.cache.getQuota(cacheID, key, interactionUserID(i))
+	if !ok {
+		b.edit(s, i, "That season picker expired. Run `/request` again.")
+		return
+	}
+	if err := validatePickerSelection(selection, quota); err != nil {
+		b.edit(s, i, err.Error())
+		return
+	}
+	if !b.cache.setSeasons(cacheID, key, interactionUserID(i), selection) {
+		b.edit(s, i, "That season picker expired. Run `/request` again.")
+		return
+	}
+	embed := b.mediaPreview(result, quota)
+	embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
+		Name:  "Selected seasons",
+		Value: seasonSelectionLabel(selection),
+	})
+	b.editPreview(s, i, embed, previewComponents(cacheID, key))
 }
 
 func (b *Bot) handleConfirm(s interactionSession, i *discordgo.InteractionCreate, data discordgo.MessageComponentInteractionData) {
@@ -144,14 +235,14 @@ func (b *Bot) handleConfirm(s interactionSession, i *discordgo.InteractionCreate
 		b.edit(s, i, "That confirmation is invalid. Run `/request` again.")
 		return
 	}
-	result, ok := b.cache.take(cacheID, key, interactionUserID(i))
+	result, seasons, ok := b.cache.take(cacheID, key, interactionUserID(i))
 	if !ok {
 		b.edit(s, i, "That confirmation expired or was already used. Run `/request` again.")
 		return
 	}
 	ctx, cancel := context.WithTimeout(b.ctx, 30*time.Second)
 	defer cancel()
-	_, err := b.handler.Request(ctx, interactionUserID(i), result)
+	_, err := b.handler.Request(ctx, interactionUserID(i), result, seasons)
 	if err != nil {
 		message := "Request failed. Try again in a minute."
 		var userErr interface{ UserMessage() string }
@@ -163,7 +254,11 @@ func (b *Bot) handleConfirm(s interactionSession, i *discordgo.InteractionCreate
 		return
 	}
 	title := escapeMarkdown(optionLabel(result))
-	b.edit(s, i, fmt.Sprintf("Your request for **%s** has been submitted successfully.\nYou will receive a direct message when it is fully available.", title))
+	selection := ""
+	if result.MediaType == "tv" {
+		selection = "\nSelected: **" + escapeMarkdown(seasonSelectionLabel(seasons)) + "**"
+	}
+	b.edit(s, i, fmt.Sprintf("Your request for **%s** has been submitted successfully.%s\nYou will receive a direct message when it is fully available.", title, selection))
 }
 
 func (b *Bot) handleCancel(s interactionSession, i *discordgo.InteractionCreate, data discordgo.MessageComponentInteractionData) {
@@ -173,4 +268,38 @@ func (b *Bot) handleCancel(s interactionSession, i *discordgo.InteractionCreate,
 	cacheID := strings.TrimPrefix(data.CustomID, componentCancel)
 	b.cache.discard(cacheID, interactionUserID(i))
 	b.edit(s, i, "Request cancelled.")
+}
+
+func parseSeasonValues(values []string) (seer.SeasonSelection, error) {
+	selection := seer.SeasonSelection{}
+	seen := make(map[int]struct{}, len(values))
+	for _, value := range values {
+		number, err := strconv.Atoi(value)
+		if err != nil || number < 0 {
+			return seer.SeasonSelection{}, errors.New("The selected seasons are invalid. Run `/request` again.")
+		}
+		if _, duplicate := seen[number]; duplicate {
+			continue
+		}
+		seen[number] = struct{}{}
+		selection.Numbers = append(selection.Numbers, number)
+	}
+	if len(selection.Numbers) == 0 {
+		return seer.SeasonSelection{}, errors.New("Select at least one season.")
+	}
+	sort.Ints(selection.Numbers)
+	return selection, nil
+}
+
+func validatePickerSelection(selection seer.SeasonSelection, quota *seer.Quota) error {
+	if selection.All {
+		if quota == nil || quota.TV.Restricted {
+			return errors.New("All seasons is only available with an unlimited TV request limit.")
+		}
+		return nil
+	}
+	if quota != nil && quota.TV.Restricted && len(selection.Numbers) > quota.TV.Remaining {
+		return fmt.Errorf("You can select up to %d more TV season(s).", quota.TV.Remaining)
+	}
+	return nil
 }

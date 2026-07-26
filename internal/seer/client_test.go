@@ -131,7 +131,7 @@ func TestSearchEncodesSpacesAsPercent20(t *testing.T) {
 	}
 }
 
-func TestRequestMediaUsesSeerrUserIDAndAllSeasons(t *testing.T) {
+func TestRequestMediaUsesSeerrUserIDAndSelectedSeasons(t *testing.T) {
 	t.Parallel()
 	var got map[string]any
 	client := newTestClient(t)
@@ -151,7 +151,7 @@ func TestRequestMediaUsesSeerrUserIDAndAllSeasons(t *testing.T) {
 		return jsonResponse(t, map[string]any{"id": 44, "status": 2}), nil
 	})}
 
-	req, err := client.RequestMedia(context.Background(), 7, "tv", 123)
+	req, err := client.RequestMedia(context.Background(), 7, "tv", 123, SeasonSelection{Numbers: []int{1, 3}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,8 +161,52 @@ func TestRequestMediaUsesSeerrUserIDAndAllSeasons(t *testing.T) {
 	if got["userId"] != float64(7) {
 		t.Fatalf("userId = %#v, want 7", got["userId"])
 	}
+	gotSeasons, ok := got["seasons"].([]any)
+	if !ok || len(gotSeasons) != 2 || gotSeasons[0] != float64(1) || gotSeasons[1] != float64(3) {
+		t.Fatalf("seasons = %#v, want [1 3]", got["seasons"])
+	}
+}
+
+func TestRequestMediaAllowsAllSeasonsExplicitly(t *testing.T) {
+	t.Parallel()
+	var got map[string]any
+	client := newTestClient(t)
+	client.httpClient = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Fatal(err)
+		}
+		return jsonResponse(t, map[string]any{"id": 44}), nil
+	})}
+
+	if _, err := client.RequestMedia(context.Background(), 7, "tv", 123, SeasonSelection{All: true}); err != nil {
+		t.Fatal(err)
+	}
 	if got["seasons"] != "all" {
 		t.Fatalf("seasons = %#v, want all", got["seasons"])
+	}
+}
+
+func TestTVDetailsSortsAndDeduplicatesSeasons(t *testing.T) {
+	t.Parallel()
+	client := newTestClient(t)
+	client.httpClient = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path != "/api/v1/tv/123" {
+			return notFoundResponse(), nil
+		}
+		return jsonResponse(t, map[string]any{"seasons": []map[string]any{
+			{"seasonNumber": 2, "name": "Season 2", "episodeCount": 8},
+			{"seasonNumber": -1, "name": "Invalid"},
+			{"seasonNumber": 1, "name": "Season 1", "episodeCount": 10},
+			{"seasonNumber": 2, "name": "Duplicate"},
+		}}), nil
+	})}
+
+	details, err := client.TVDetails(context.Background(), 123)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(details.Seasons) != 2 || details.Seasons[0].SeasonNumber != 1 || details.Seasons[1].SeasonNumber != 2 {
+		t.Fatalf("seasons = %#v, want sorted unique seasons 1 and 2", details.Seasons)
 	}
 }
 
@@ -174,14 +218,20 @@ func TestRequestMediaValidatesInputBeforeHTTP(t *testing.T) {
 		return nil, nil
 	})}
 
-	if _, err := client.RequestMedia(context.Background(), 0, "music", 123); err == nil {
+	if _, err := client.RequestMedia(context.Background(), 0, "music", 123, SeasonSelection{}); err == nil {
 		t.Fatal("RequestMedia accepted unsupported media type")
 	}
-	if _, err := client.RequestMedia(context.Background(), 0, "movie", 0); err == nil {
+	if _, err := client.RequestMedia(context.Background(), 0, "movie", 0, SeasonSelection{}); err == nil {
 		t.Fatal("RequestMedia accepted missing media ID")
 	}
-	if _, err := client.RequestMedia(context.Background(), -1, "movie", 1); err == nil {
+	if _, err := client.RequestMedia(context.Background(), -1, "movie", 1, SeasonSelection{}); err == nil {
 		t.Fatal("RequestMedia accepted a negative user ID")
+	}
+	if _, err := client.RequestMedia(context.Background(), 1, "tv", 1, SeasonSelection{}); err == nil {
+		t.Fatal("RequestMedia accepted a TV request without seasons")
+	}
+	if _, err := client.RequestMedia(context.Background(), 1, "tv", 1, SeasonSelection{Numbers: []int{-1}}); err == nil {
+		t.Fatal("RequestMedia accepted a negative season number")
 	}
 }
 

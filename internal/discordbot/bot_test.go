@@ -89,6 +89,54 @@ func TestQuotaLabelIncludesUsageAndLimits(t *testing.T) {
 	}
 }
 
+func TestSeasonPickerEnforcesLimitedQuotaAndHidesAllSeasons(t *testing.T) {
+	t.Parallel()
+	seasons := []seer.Season{
+		{SeasonNumber: 1, Name: "Season 1", EpisodeCount: 10},
+		{SeasonNumber: 2, Name: "Season 2", EpisodeCount: 8},
+		{SeasonNumber: 3, Name: "Season 3", EpisodeCount: 6},
+		{SeasonNumber: 4, Name: "Season 4", EpisodeCount: 4},
+	}
+	quota := &seer.Quota{TV: seer.QuotaUsage{Restricted: true, Remaining: 3}}
+	components := seasonPickerComponents("cache", "result", seasons, quota)
+
+	menu := components[0].(discordgo.ActionsRow).Components[0].(discordgo.SelectMenu)
+	if menu.MaxValues != 3 {
+		t.Fatalf("max values = %d, want 3", menu.MaxValues)
+	}
+	buttons := components[1].(discordgo.ActionsRow).Components
+	if len(buttons) != 1 {
+		t.Fatalf("buttons = %#v, want only Cancel", buttons)
+	}
+}
+
+func TestSeasonPickerShowsAllSeasonsOnlyForUnlimitedQuota(t *testing.T) {
+	t.Parallel()
+	seasons := []seer.Season{{SeasonNumber: 1}, {SeasonNumber: 2}}
+	quota := &seer.Quota{TV: seer.QuotaUsage{Restricted: false}}
+	components := seasonPickerComponents("cache", "result", seasons, quota)
+
+	buttons := components[1].(discordgo.ActionsRow).Components
+	if len(buttons) != 2 {
+		t.Fatalf("buttons = %#v, want Select all seasons and Cancel", buttons)
+	}
+	allButton := buttons[0].(discordgo.Button)
+	if allButton.CustomID != componentAll+"cache:result" {
+		t.Fatalf("all-seasons custom ID = %q", allButton.CustomID)
+	}
+}
+
+func TestParseSeasonValuesSortsAndDeduplicates(t *testing.T) {
+	t.Parallel()
+	selection, err := parseSeasonValues([]string{"3", "1", "3"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(selection.Numbers) != 2 || selection.Numbers[0] != 1 || selection.Numbers[1] != 3 {
+		t.Fatalf("selection = %#v, want seasons 1 and 3", selection)
+	}
+}
+
 func TestEphemeralDisablesMentions(t *testing.T) {
 	t.Parallel()
 	session := &fakeInteractionSession{}

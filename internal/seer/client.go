@@ -10,6 +10,7 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -86,6 +87,21 @@ type QuotaUsage struct {
 	Used       int  `json:"used"`
 	Remaining  int  `json:"remaining"`
 	Restricted bool `json:"restricted"`
+}
+
+type TVDetails struct {
+	Seasons []Season `json:"seasons"`
+}
+
+type Season struct {
+	SeasonNumber int    `json:"seasonNumber"`
+	Name         string `json:"name"`
+	EpisodeCount int    `json:"episodeCount"`
+}
+
+type SeasonSelection struct {
+	Numbers []int
+	All     bool
 }
 
 type Request struct {
@@ -215,7 +231,7 @@ func (c *Client) FindUserByDiscordID(ctx context.Context, discordID string) (Use
 	}
 }
 
-func (c *Client) RequestMedia(ctx context.Context, userID int, mediaType string, mediaID int) (Request, error) {
+func (c *Client) RequestMedia(ctx context.Context, userID int, mediaType string, mediaID int, seasons SeasonSelection) (Request, error) {
 	if userID < 0 {
 		return Request{}, errors.New("user ID must not be negative")
 	}
@@ -224,6 +240,26 @@ func (c *Client) RequestMedia(ctx context.Context, userID int, mediaType string,
 	}
 	if mediaType != "movie" && mediaType != "tv" {
 		return Request{}, fmt.Errorf("unsupported media type %q", mediaType)
+	}
+	if mediaType == "movie" && (seasons.All || len(seasons.Numbers) != 0) {
+		return Request{}, errors.New("movie requests must not include seasons")
+	}
+	if mediaType == "tv" && seasons.All == (len(seasons.Numbers) != 0) {
+		return Request{}, errors.New("TV requests must include either selected seasons or all seasons")
+	}
+	if mediaType == "tv" && !seasons.All {
+		numbers := append([]int(nil), seasons.Numbers...)
+		sort.Ints(numbers)
+		unique := numbers[:0]
+		for _, number := range numbers {
+			if number < 0 {
+				return Request{}, errors.New("season numbers must not be negative")
+			}
+			if len(unique) == 0 || unique[len(unique)-1] != number {
+				unique = append(unique, number)
+			}
+		}
+		seasons.Numbers = unique
 	}
 	body := map[string]any{
 		"mediaType": mediaType,
@@ -234,7 +270,11 @@ func (c *Client) RequestMedia(ctx context.Context, userID int, mediaType string,
 		body["userId"] = userID
 	}
 	if mediaType == "tv" {
-		body["seasons"] = "all"
+		if seasons.All {
+			body["seasons"] = "all"
+		} else {
+			body["seasons"] = seasons.Numbers
+		}
 	}
 	var out Request
 	if err := c.do(ctx, http.MethodPost, "/api/v1/request", body, &out); err != nil {
@@ -243,6 +283,33 @@ func (c *Client) RequestMedia(ctx context.Context, userID int, mediaType string,
 	if out.ID <= 0 {
 		return Request{}, errors.New("Seerr create-request response is missing a valid request ID")
 	}
+	return out, nil
+}
+
+func (c *Client) TVDetails(ctx context.Context, mediaID int) (TVDetails, error) {
+	if mediaID <= 0 {
+		return TVDetails{}, errors.New("media ID must be positive")
+	}
+	var out TVDetails
+	if err := c.do(ctx, http.MethodGet, "/api/v1/tv/"+strconv.Itoa(mediaID), nil, &out); err != nil {
+		return TVDetails{}, err
+	}
+	seasons := out.Seasons[:0]
+	seen := make(map[int]struct{}, len(out.Seasons))
+	for _, season := range out.Seasons {
+		if season.SeasonNumber < 0 {
+			continue
+		}
+		if _, duplicate := seen[season.SeasonNumber]; duplicate {
+			continue
+		}
+		seen[season.SeasonNumber] = struct{}{}
+		seasons = append(seasons, season)
+	}
+	sort.Slice(seasons, func(i, j int) bool {
+		return seasons[i].SeasonNumber < seasons[j].SeasonNumber
+	})
+	out.Seasons = seasons
 	return out, nil
 }
 

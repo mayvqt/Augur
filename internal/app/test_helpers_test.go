@@ -38,18 +38,20 @@ func testConfig() config.Config {
 }
 
 type fakeSeer struct {
-	searchResults   []seer.SearchResult
-	user            seer.User
-	found           bool
-	quota           seer.Quota
-	createdRequest  seer.Request
-	requestByID     map[int]seer.Request
-	requestFailures int
-	requestErr      error
-	requestHook     func()
-	requestCalls    int
-	searchCalls     int
-	searchQuery     string
+	searchResults    []seer.SearchResult
+	user             seer.User
+	found            bool
+	quota            seer.Quota
+	tvDetails        seer.TVDetails
+	createdRequest   seer.Request
+	requestByID      map[int]seer.Request
+	requestFailures  int
+	requestErr       error
+	requestHook      func()
+	requestCalls     int
+	requestedSeasons seer.SeasonSelection
+	searchCalls      int
+	searchQuery      string
 }
 
 func (f *fakeSeer) Search(ctx context.Context, query string) ([]seer.SearchResult, error) {
@@ -75,10 +77,18 @@ func (f *fakeSeer) UserQuota(ctx context.Context, userID int) (seer.Quota, error
 	return f.quota, nil
 }
 
-func (f *fakeSeer) RequestMedia(ctx context.Context, userID int, mediaType string, mediaID int) (seer.Request, error) {
+func (f *fakeSeer) TVDetails(ctx context.Context, mediaID int) (seer.TVDetails, error) {
+	if err := ctx.Err(); err != nil {
+		return seer.TVDetails{}, err
+	}
+	return f.tvDetails, nil
+}
+
+func (f *fakeSeer) RequestMedia(ctx context.Context, userID int, mediaType string, mediaID int, seasons seer.SeasonSelection) (seer.Request, error) {
 	if err := ctx.Err(); err != nil {
 		return seer.Request{}, err
 	}
+	f.requestedSeasons = seasons
 	return f.createdRequest, nil
 }
 

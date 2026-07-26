@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -37,12 +38,9 @@ func (r *Runner) Quota(ctx context.Context, discordID string) (*seer.Quota, erro
 	if !r.cfg.Link.RequireMatch {
 		return nil, nil
 	}
-	user, ok, err := r.seer.FindUserByDiscordID(ctx, strings.TrimSpace(discordID))
+	user, err := r.requireLinkedUser(ctx, discordID)
 	if err != nil {
 		return nil, err
-	}
-	if !ok {
-		return nil, &userFacingError{message: "Your Discord account is not linked in Seerr yet. Run `/link` first."}
 	}
 	quota, err := r.seer.UserQuota(ctx, user.ID)
 	if err != nil {
@@ -51,7 +49,15 @@ func (r *Runner) Quota(ctx context.Context, discordID string) (*seer.Quota, erro
 	return &quota, nil
 }
 
-func (r *Runner) Request(ctx context.Context, discordID string, result seer.SearchResult) (seer.Request, error) {
+func (r *Runner) TVSeasons(ctx context.Context, mediaID int) ([]seer.Season, error) {
+	details, err := r.seer.TVDetails(ctx, mediaID)
+	if err != nil {
+		return nil, err
+	}
+	return details.Seasons, nil
+}
+
+func (r *Runner) Request(ctx context.Context, discordID string, result seer.SearchResult, seasons seer.SeasonSelection) (seer.Request, error) {
 	r.metrics.requests.Add(1)
 	discordID = strings.TrimSpace(discordID)
 	if discordID == "" {
@@ -71,19 +77,40 @@ func (r *Runner) Request(ctx context.Context, discordID string, result seer.Sear
 		return seer.Request{}, fmt.Errorf("storage is unavailable: %w", err)
 	}
 	var seerUserID int
+	var quota *seer.Quota
 	if r.cfg.Link.RequireMatch {
-		user, ok, err := r.seer.FindUserByDiscordID(ctx, discordID)
+		user, err := r.requireLinkedUser(ctx, discordID)
 		if err != nil {
 			r.metrics.requestFailures.Add(1)
 			return seer.Request{}, err
 		}
-		if !ok {
-			r.metrics.requestFailures.Add(1)
-			return seer.Request{}, &userFacingError{message: "Your Discord account is not linked in Seerr yet. Run `/link` first."}
-		}
 		seerUserID = user.ID
+		if result.MediaType == "tv" {
+			userQuota, err := r.seer.UserQuota(ctx, user.ID)
+			if err != nil {
+				r.metrics.requestFailures.Add(1)
+				return seer.Request{}, err
+			}
+			quota = &userQuota
+		}
 	}
-	req, err := r.seer.RequestMedia(ctx, seerUserID, result.MediaType, result.ID)
+	seasons, err := validateSeasonSelection(result.MediaType, seasons, quota)
+	if err != nil {
+		r.metrics.requestFailures.Add(1)
+		return seer.Request{}, err
+	}
+	if result.MediaType == "tv" && !seasons.All {
+		details, err := r.seer.TVDetails(ctx, result.ID)
+		if err != nil {
+			r.metrics.requestFailures.Add(1)
+			return seer.Request{}, err
+		}
+		if err := validateRequestedSeasons(seasons.Numbers, details.Seasons); err != nil {
+			r.metrics.requestFailures.Add(1)
+			return seer.Request{}, err
+		}
+	}
+	req, err := r.seer.RequestMedia(ctx, seerUserID, result.MediaType, result.ID, seasons)
 	if err != nil {
 		r.metrics.requestFailures.Add(1)
 		return seer.Request{}, err
@@ -107,6 +134,73 @@ func (r *Runner) Request(ctx context.Context, discordID string, result seer.Sear
 		r.metrics.duplicateSubscriptions.Add(1)
 	}
 	return req, nil
+}
+
+func (r *Runner) requireLinkedUser(ctx context.Context, discordID string) (seer.User, error) {
+	user, ok, err := r.seer.FindUserByDiscordID(ctx, strings.TrimSpace(discordID))
+	if err != nil {
+		return seer.User{}, err
+	}
+	if !ok {
+		return seer.User{}, &userFacingError{message: "Your Discord account is not linked in Seerr yet. Run `/link` first."}
+	}
+	return user, nil
+}
+
+func validateSeasonSelection(mediaType string, selection seer.SeasonSelection, quota *seer.Quota) (seer.SeasonSelection, error) {
+	if mediaType == "movie" {
+		if selection.All || len(selection.Numbers) != 0 {
+			return seer.SeasonSelection{}, errors.New("movie requests must not include seasons")
+		}
+		return seer.SeasonSelection{}, nil
+	}
+	if mediaType != "tv" {
+		return seer.SeasonSelection{}, fmt.Errorf("unsupported media type %q", mediaType)
+	}
+	if selection.All {
+		if quota == nil || quota.TV.Restricted {
+			return seer.SeasonSelection{}, &userFacingError{message: "All seasons can only be requested when your TV request limit is unlimited."}
+		}
+		if len(selection.Numbers) != 0 {
+			return seer.SeasonSelection{}, errors.New("all seasons cannot be combined with individual seasons")
+		}
+		return seer.SeasonSelection{All: true}, nil
+	}
+	if len(selection.Numbers) == 0 {
+		return seer.SeasonSelection{}, &userFacingError{message: "Select at least one season."}
+	}
+	numbers := append([]int(nil), selection.Numbers...)
+	sort.Ints(numbers)
+	unique := numbers[:0]
+	for _, number := range numbers {
+		if number < 0 {
+			return seer.SeasonSelection{}, errors.New("season numbers must not be negative")
+		}
+		if len(unique) == 0 || unique[len(unique)-1] != number {
+			unique = append(unique, number)
+		}
+	}
+	if quota != nil && quota.TV.Restricted && len(unique) > quota.TV.Remaining {
+		return seer.SeasonSelection{}, &userFacingError{
+			message: fmt.Sprintf("You can request %d more TV season(s) in the current quota window.", quota.TV.Remaining),
+		}
+	}
+	return seer.SeasonSelection{Numbers: unique}, nil
+}
+
+func validateRequestedSeasons(requested []int, available []seer.Season) error {
+	valid := make(map[int]struct{}, len(available))
+	for _, season := range available {
+		if season.SeasonNumber >= 0 {
+			valid[season.SeasonNumber] = struct{}{}
+		}
+	}
+	for _, number := range requested {
+		if _, ok := valid[number]; !ok {
+			return &userFacingError{message: fmt.Sprintf("Season %d is not available to request for this show.", number)}
+		}
+	}
+	return nil
 }
 
 func displayTitle(result seer.SearchResult) string {
