@@ -6,6 +6,8 @@ const (
 	commandLink      = "link"
 	commandRequest   = "request"
 	componentPick    = "augur:pick:"
+	componentSeasons = "augur:seasons:"
+	componentAll     = "augur:all:"
 	componentConfirm = "augur:confirm:"
 	componentCancel  = "augur:cancel:"
 )

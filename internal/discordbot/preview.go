@@ -2,6 +2,7 @@ package discordbot
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/bwmarrin/discordgo"
@@ -58,6 +59,98 @@ func previewComponents(cacheID, key string) []discordgo.MessageComponent {
 			Style:    discordgo.SecondaryButton,
 		},
 	}}}
+}
+
+func seasonPickerComponents(cacheID, key string, seasons []seer.Season, quota *seer.Quota) []discordgo.MessageComponent {
+	maxSelections := len(seasons)
+	if quota != nil && quota.TV.Restricted && quota.TV.Remaining < maxSelections {
+		maxSelections = quota.TV.Remaining
+	}
+	if maxSelections <= 0 {
+		return cancelComponents(cacheID)
+	}
+
+	options := make([]discordgo.SelectMenuOption, 0, min(len(seasons), 25))
+	for _, season := range seasons {
+		if len(options) == 25 {
+			break
+		}
+		label := seasonLabel(season)
+		description := ""
+		if season.EpisodeCount > 0 {
+			description = fmt.Sprintf("%d episodes", season.EpisodeCount)
+		}
+		options = append(options, discordgo.SelectMenuOption{
+			Label:       truncate(label, 100),
+			Description: description,
+			Value:       strconv.Itoa(season.SeasonNumber),
+		})
+	}
+	if len(options) == 0 {
+		return cancelComponents(cacheID)
+	}
+	maxSelections = min(maxSelections, len(options))
+	placeholder := fmt.Sprintf("Choose up to %d season(s)", maxSelections)
+	buttons := []discordgo.MessageComponent{}
+	if quota != nil && !quota.TV.Restricted {
+		buttons = append(buttons, discordgo.Button{
+			CustomID: componentAll + cacheID + ":" + key,
+			Label:    "Select all seasons",
+			Style:    discordgo.PrimaryButton,
+		})
+	}
+	buttons = append(buttons, discordgo.Button{
+		CustomID: componentCancel + cacheID,
+		Label:    "Cancel",
+		Style:    discordgo.SecondaryButton,
+	})
+	return []discordgo.MessageComponent{
+		discordgo.ActionsRow{Components: []discordgo.MessageComponent{
+			discordgo.SelectMenu{
+				CustomID:    componentSeasons + cacheID + ":" + key,
+				Placeholder: placeholder,
+				MinValues:   intPtr(1),
+				MaxValues:   maxSelections,
+				Options:     options,
+			},
+		}},
+		discordgo.ActionsRow{Components: buttons},
+	}
+}
+
+func cancelComponents(cacheID string) []discordgo.MessageComponent {
+	return []discordgo.MessageComponent{discordgo.ActionsRow{Components: []discordgo.MessageComponent{
+		discordgo.Button{
+			CustomID: componentCancel + cacheID,
+			Label:    "Cancel",
+			Style:    discordgo.SecondaryButton,
+		},
+	}}}
+}
+
+func seasonLabel(season seer.Season) string {
+	if name := normalizeInlineText(season.Name); name != "" {
+		return name
+	}
+	if season.SeasonNumber == 0 {
+		return "Specials"
+	}
+	return fmt.Sprintf("Season %d", season.SeasonNumber)
+}
+
+func seasonSelectionLabel(selection seer.SeasonSelection) string {
+	if selection.All {
+		return "All seasons"
+	}
+	labels := make([]string, 0, len(selection.Numbers))
+	for _, number := range selection.Numbers {
+		if number == 0 {
+			labels = append(labels, "Specials")
+		} else {
+			labels = append(labels, fmt.Sprintf("Season %d", number))
+		}
+	}
+	return strings.Join(labels, ", ")
 }
 
 func languageLabel(language string) string {
