@@ -1,27 +1,22 @@
 # Augur
 
-Augur is a headless Discord bot for [Seerr](https://github.com/seerr-team/seerr).
+Augur is a lightweight Discord bot for requesting movies and TV shows through
+[Seerr](https://github.com/seerr-team/seerr).
 
-It lets Discord users link their Seerr account, search movies and shows with `/request`, submit requests from a dropdown, and receive a DM when the requested media becomes available.
+Users can link their Seerr account, search with `/request`, review media details
+before submitting, and receive a DM when their request becomes available.
 
-## Quick Start
-
-```bash
-cp config.example.json config.json
-# edit config.json
-go run ./cmd/augur -config config.json
-```
-
-## Docs
+## Documentation
 
 - [Setup](docs/setup.md)
 - [Configuration](docs/configuration.md)
 - [Unraid](docs/unraid.md)
 - [Development](docs/development.md)
 
-## Checks
+## Run with Docker
 
 ```bash
-go test ./...
-go vet ./...
+docker compose up -d
 ```
+
+Augur stores its generated configuration and SQLite database in `./data`.
