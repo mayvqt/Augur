@@ -15,6 +15,9 @@ before submitting, and receive a DM when their request becomes available.
 
 ## Run with Docker
 
+Set the [required environment variables](docs/configuration.md#required-environment-variables),
+then run:
+
 ```bash
 docker compose up -d
 ```

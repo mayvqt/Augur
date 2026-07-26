@@ -43,6 +43,9 @@ jobs:
             exit 1
           fi
 
+      - name: Check module files
+        run: go mod tidy -diff
+
       - name: Check diff whitespace
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then

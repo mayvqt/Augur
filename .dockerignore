@@ -6,14 +6,13 @@
 .codex/
 
 # Local secrets and runtime config
-.env
-.env.*
-!.env.example
-config.json
-config.local.json
-config.*.local.json
-data/
-config/
+/.env
+/.env.*
+/config.json
+/config.local.json
+/config.*.local.json
+/data/
+/config/
 
 # Runtime state
 *.db
@@ -23,11 +22,11 @@ config/
 augur-state.*
 
 # Build, test, and coverage output
-augur
-bin/
-dist/
-build/
-tmp/
+/augur
+/bin/
+/dist/
+/build/
+/tmp/
 *.test
 *.out
 coverage.out
@@ -36,7 +35,6 @@ coverage.*
 
 # Tool caches
 .cache/
-.pytest_cache/
 
 # Editor and OS noise
 .DS_Store
