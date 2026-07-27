@@ -266,9 +266,6 @@ func (c *Client) RequestMedia(ctx context.Context, userID int, mediaType string,
 		"mediaId":   mediaID,
 		"is4k":      false,
 	}
-	if userID > 0 {
-		body["userId"] = userID
-	}
 	if mediaType == "tv" {
 		if seasons.All {
 			body["seasons"] = "all"
@@ -277,7 +274,7 @@ func (c *Client) RequestMedia(ctx context.Context, userID int, mediaType string,
 		}
 	}
 	var out Request
-	if err := c.do(ctx, http.MethodPost, "/api/v1/request", body, &out); err != nil {
+	if err := c.doAsUser(ctx, http.MethodPost, "/api/v1/request", body, &out, userID); err != nil {
 		return Request{}, err
 	}
 	if out.ID <= 0 {
@@ -347,9 +344,16 @@ func (c *Client) UserQuota(ctx context.Context, userID int) (Quota, error) {
 }
 
 func (c *Client) do(ctx context.Context, method, path string, body any, out any) error {
+	return c.doAsUser(ctx, method, path, body, out, 0)
+}
+
+func (c *Client) doAsUser(ctx context.Context, method, path string, body any, out any, userID int) error {
 	req, err := c.newRequest(ctx, method, path, body)
 	if err != nil {
 		return err
+	}
+	if userID > 0 {
+		req.Header.Set("X-Api-User", strconv.Itoa(userID))
 	}
 	resp, err := c.httpClient.Do(req)
 	if err != nil {

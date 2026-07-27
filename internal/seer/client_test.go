@@ -131,7 +131,7 @@ func TestSearchEncodesSpacesAsPercent20(t *testing.T) {
 	}
 }
 
-func TestRequestMediaUsesSeerrUserIDAndSelectedSeasons(t *testing.T) {
+func TestRequestMediaAuthenticatesAsSeerrUserAndSelectsSeasons(t *testing.T) {
 	t.Parallel()
 	var got map[string]any
 	client := newTestClient(t)
@@ -142,8 +142,8 @@ func TestRequestMediaUsesSeerrUserIDAndSelectedSeasons(t *testing.T) {
 		if key := r.Header.Get("X-Api-Key"); key != "key" {
 			t.Fatalf("X-Api-Key = %q, want key", key)
 		}
-		if userHeader := r.Header.Get("X-Api-User"); userHeader != "" {
-			t.Fatalf("X-Api-User = %q, want empty", userHeader)
+		if userHeader := r.Header.Get("X-Api-User"); userHeader != "7" {
+			t.Fatalf("X-Api-User = %q, want 7", userHeader)
 		}
 		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
 			t.Fatal(err)
@@ -158,12 +158,34 @@ func TestRequestMediaUsesSeerrUserIDAndSelectedSeasons(t *testing.T) {
 	if req.ID != 44 {
 		t.Fatalf("request ID = %d, want 44", req.ID)
 	}
-	if got["userId"] != float64(7) {
-		t.Fatalf("userId = %#v, want 7", got["userId"])
+	if _, present := got["userId"]; present {
+		t.Fatalf("request body contains userId = %#v, want field omitted", got["userId"])
 	}
 	gotSeasons, ok := got["seasons"].([]any)
 	if !ok || len(gotSeasons) != 2 || gotSeasons[0] != float64(1) || gotSeasons[1] != float64(3) {
 		t.Fatalf("seasons = %#v, want [1 3]", got["seasons"])
+	}
+}
+
+func TestRequestMediaWithoutUserDoesNotSendImpersonation(t *testing.T) {
+	t.Parallel()
+	var got map[string]any
+	client := newTestClient(t)
+	client.httpClient = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if userHeader := r.Header.Get("X-Api-User"); userHeader != "" {
+			t.Fatalf("X-Api-User = %q, want empty", userHeader)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Fatal(err)
+		}
+		return jsonResponse(t, map[string]any{"id": 44}), nil
+	})}
+
+	if _, err := client.RequestMedia(context.Background(), 0, "movie", 123, SeasonSelection{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, present := got["userId"]; present {
+		t.Fatalf("request body contains userId = %#v, want field omitted", got["userId"])
 	}
 }
 
