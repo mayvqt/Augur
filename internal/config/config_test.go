@@ -174,3 +174,50 @@ func TestValidateRejectsAmbiguousOrCredentialedBaseURL(t *testing.T) {
 		t.Fatal("Validate accepted credentials embedded in a URL")
 	}
 }
+
+func TestValidateRejectsPublicURLQuery(t *testing.T) {
+	t.Parallel()
+	cfg := defaults()
+	cfg.Discord.Token = "token"
+	cfg.Seer.BaseURL = "https://seer.example.test"
+	cfg.Seer.APIKey = "key"
+	cfg.Link.PublicURL = "https://seer.example.test?api_key=secret"
+
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate accepted a public URL with a query")
+	}
+}
+
+func TestApplySecretEnvironmentReadsFiles(t *testing.T) {
+	dir := t.TempDir()
+	discordPath := filepath.Join(dir, "discord-token")
+	seerPath := filepath.Join(dir, "seer-key")
+	if err := os.WriteFile(discordPath, []byte(" discord-secret\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(seerPath, []byte(" seer-secret\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TEST_AUGUR_DISCORD_TOKEN_FILE", discordPath)
+	t.Setenv("TEST_AUGUR_SEERR_API_KEY_FILE", seerPath)
+
+	var discordToken, seerKey string
+	if err := applySecretEnvironment("TEST_AUGUR_DISCORD_TOKEN", "TEST_AUGUR_DISCORD_TOKEN_FILE", &discordToken); err != nil {
+		t.Fatal(err)
+	}
+	if err := applySecretEnvironment("TEST_AUGUR_SEERR_API_KEY", "TEST_AUGUR_SEERR_API_KEY_FILE", &seerKey); err != nil {
+		t.Fatal(err)
+	}
+	if discordToken != "discord-secret" || seerKey != "seer-secret" {
+		t.Fatalf("file secrets were not loaded and trimmed")
+	}
+}
+
+func TestSecretEnvironmentRejectsAmbiguousSources(t *testing.T) {
+	t.Setenv("TEST_AUGUR_DISCORD_TOKEN", "direct")
+	t.Setenv("TEST_AUGUR_DISCORD_TOKEN_FILE", filepath.Join(t.TempDir(), "token"))
+	var target string
+	if err := applySecretEnvironment("TEST_AUGUR_DISCORD_TOKEN", "TEST_AUGUR_DISCORD_TOKEN_FILE", &target); err == nil {
+		t.Fatal("applyEnvironment accepted direct and file secret sources")
+	}
+}

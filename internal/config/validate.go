@@ -29,7 +29,7 @@ func (c Config) Validate() error {
 	if c.Seer.BaseURL == "" {
 		return errors.New("seer.base_url is required")
 	}
-	if !isSeerBaseURL(c.Seer.BaseURL) {
+	if !isSafeURL(c.Seer.BaseURL) {
 		return errors.New("seer.base_url must be an absolute http or https URL without credentials, query parameters, or a fragment")
 	}
 	if c.Seer.APIKey == "" {
@@ -41,8 +41,8 @@ func (c Config) Validate() error {
 	if c.Link.PublicURL == "" {
 		return errors.New("link.public_url is required; set it to the public Seerr URL")
 	}
-	if !isPublicURL(c.Link.PublicURL) {
-		return errors.New("link.public_url must be an absolute http or https URL without credentials or a fragment")
+	if !isSafeURL(c.Link.PublicURL) {
+		return errors.New("link.public_url must be an absolute http or https URL without credentials, query parameters, or a fragment")
 	}
 	if c.Storage.Path == "" {
 		return errors.New("storage.path is required")
@@ -59,20 +59,12 @@ func (c Config) Validate() error {
 	return nil
 }
 
-func isSeerBaseURL(value string) bool {
+func isSafeURL(value string) bool {
 	parsed, err := url.Parse(value)
 	if err != nil {
 		return false
 	}
 	return validHTTPURL(parsed) && parsed.RawQuery == "" && !parsed.ForceQuery && parsed.Fragment == ""
-}
-
-func isPublicURL(value string) bool {
-	parsed, err := url.Parse(value)
-	if err != nil {
-		return false
-	}
-	return validHTTPURL(parsed) && parsed.Fragment == ""
 }
 
 func validHTTPURL(parsed *url.URL) bool {
