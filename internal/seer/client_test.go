@@ -294,6 +294,7 @@ func TestClientMethodsValidateIdentifiersBeforeHTTP(t *testing.T) {
 func TestDoWrapsInvalidJSONWithEndpoint(t *testing.T) {
 	t.Parallel()
 	client := newTestClient(t)
+	const secret = "private-search"
 	client.httpClient = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		return &http.Response{
 			StatusCode: 200,
@@ -301,31 +302,35 @@ func TestDoWrapsInvalidJSONWithEndpoint(t *testing.T) {
 		}, nil
 	})}
 
-	err := client.do(context.Background(), http.MethodGet, "/api/v1/request/1", nil, &Request{})
+	err := client.do(context.Background(), http.MethodGet, "/api/v1/request/1?query="+secret, nil, &Request{})
 	if err == nil || !strings.Contains(err.Error(), "decode seerr GET /api/v1/request/1 response") {
 		t.Fatalf("err = %v, want endpoint decode context", err)
 	}
+	if strings.Contains(err.Error(), secret) {
+		t.Fatalf("error exposed query: %q", err.Error())
+	}
 }
 
-func TestDoLimitsErrorResponseSnippet(t *testing.T) {
+func TestDoDoesNotExposeErrorResponseBodyOrQuery(t *testing.T) {
 	t.Parallel()
 	client := newTestClient(t)
+	const secret = "super-secret-api-key"
 	client.httpClient = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		return &http.Response{
 			StatusCode: 500,
-			Body:       io.NopCloser(strings.NewReader(strings.Repeat("x", maxErrorBodyBytes+100))),
+			Body:       io.NopCloser(strings.NewReader(`{"error":"reflected ` + secret + `"}`)),
 		}, nil
 	})}
 
-	err := client.do(context.Background(), http.MethodGet, "/api/v1/request/1", nil, &Request{})
+	err := client.do(context.Background(), http.MethodGet, "/api/v1/search?query="+secret, nil, &Request{})
 	if err == nil {
 		t.Fatal("expected HTTP error")
 	}
-	if len(err.Error()) > maxErrorBodyBytes+128 {
-		t.Fatalf("error length = %d, want bounded snippet", len(err.Error()))
+	if strings.Contains(err.Error(), secret) {
+		t.Fatalf("error exposed response body or query: %q", err.Error())
 	}
-	if !strings.HasSuffix(err.Error(), "...") {
-		t.Fatalf("err = %q, want ellipsis suffix", err.Error())
+	if !strings.Contains(err.Error(), "GET /api/v1/search returned HTTP 500") {
+		t.Fatalf("err = %q, want safe endpoint context", err.Error())
 	}
 }
 

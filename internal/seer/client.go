@@ -16,10 +16,7 @@ import (
 	"time"
 )
 
-const (
-	maxResponseBodyBytes = 1 << 20
-	maxErrorBodyBytes    = 2048
-)
+const maxResponseBodyBytes = 1 << 20
 
 type Client struct {
 	baseURL    string
@@ -31,11 +28,10 @@ type responseError struct {
 	method     string
 	path       string
 	statusCode int
-	snippet    string
 }
 
 func (e *responseError) Error() string {
-	return fmt.Sprintf("seerr %s %s returned %d: %s", e.method, e.path, e.statusCode, e.snippet)
+	return fmt.Sprintf("seerr %s %s returned HTTP %d", e.method, e.path, e.statusCode)
 }
 
 // IsRetryable reports whether another attempt may recover from a Seerr error.
@@ -348,6 +344,7 @@ func (c *Client) do(ctx context.Context, method, path string, body any, out any)
 }
 
 func (c *Client) doAsUser(ctx context.Context, method, path string, body any, out any, userID int) error {
+	endpoint := safeEndpointPath(path)
 	req, err := c.newRequest(ctx, method, path, body)
 	if err != nil {
 		return err
@@ -360,12 +357,15 @@ func (c *Client) doAsUser(ctx context.Context, method, path string, body any, ou
 		return err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		// Response bodies are deliberately excluded from errors. Upstream errors can
+		// contain reflected request headers, credentials, or other sensitive data,
+		// and these errors are subsequently written to application logs.
+		return &responseError{method: method, path: endpoint, statusCode: resp.StatusCode}
+	}
 	data, err := readResponseBody(resp.Body)
 	if err != nil {
 		return err
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return &responseError{method: method, path: path, statusCode: resp.StatusCode, snippet: responseSnippet(data)}
 	}
 	if out == nil || len(data) == 0 {
 		return nil
@@ -373,12 +373,22 @@ func (c *Client) doAsUser(ctx context.Context, method, path string, body any, ou
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.UseNumber()
 	if err := decoder.Decode(out); err != nil {
-		return fmt.Errorf("decode seerr %s %s response: %w", method, path, err)
+		return fmt.Errorf("decode seerr %s %s response: %w", method, endpoint, err)
 	}
 	if err := ensureJSONEOF(decoder); err != nil {
-		return fmt.Errorf("decode seerr %s %s response: %w", method, path, err)
+		return fmt.Errorf("decode seerr %s %s response: %w", method, endpoint, err)
 	}
 	return nil
+}
+
+func safeEndpointPath(path string) string {
+	if parsed, err := url.Parse(path); err == nil && parsed.Path != "" {
+		return parsed.Path
+	}
+	if clean, _, found := strings.Cut(path, "?"); found {
+		return clean
+	}
+	return path
 }
 
 func ensureJSONEOF(decoder *json.Decoder) error {
@@ -424,12 +434,4 @@ func readResponseBody(body io.Reader) ([]byte, error) {
 		return nil, fmt.Errorf("seerr response exceeded %d bytes", maxResponseBodyBytes)
 	}
 	return data, nil
-}
-
-func responseSnippet(data []byte) string {
-	text := strings.TrimSpace(string(data))
-	if len(text) <= maxErrorBodyBytes {
-		return text
-	}
-	return text[:maxErrorBodyBytes] + "..."
 }

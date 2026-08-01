@@ -14,6 +14,7 @@ import (
 
 	"github.com/mayvqt/Augur/internal/app"
 	"github.com/mayvqt/Augur/internal/config"
+	"github.com/mayvqt/Augur/internal/safelog"
 )
 
 func main() {
@@ -28,7 +29,6 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	logger := slog.New(slog.NewJSONHandler(stdout, nil))
 	path := os.Getenv("AUGUR_CONFIG")
 	if *configPath != "" {
 		path = *configPath
@@ -40,16 +40,19 @@ func run(args []string, stdout, stderr io.Writer) int {
 	cfg, err := config.Load(path)
 	if err != nil {
 		fmt.Fprintln(stderr, "configuration failed:", err)
-		logger.Error("configuration failed", "error", err)
+		slog.New(slog.NewJSONHandler(stdout, nil)).Error("configuration failed", "error", err)
 		return 1
 	}
+	secrets := []string{cfg.Discord.Token, cfg.Seer.APIKey}
+	redactor := safelog.New(secrets...)
+	logger := slog.New(redactor.JSONHandler(stdout))
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	runner, err := app.New(cfg, logger)
 	if err != nil {
-		fmt.Fprintln(stderr, "application initialization failed:", err)
+		fmt.Fprintln(stderr, "application initialization failed:", redactor.String(err.Error()))
 		logger.Error("application initialization failed", "error", err)
 		return 1
 	}
@@ -57,7 +60,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	runErr := runner.Run(ctx)
 	closeErr := runner.Close()
 	if err := errors.Join(runErr, closeErr); err != nil {
-		fmt.Fprintln(stderr, "application stopped with error:", err)
+		fmt.Fprintln(stderr, "application stopped with error:", redactor.String(err.Error()))
 		logger.Error("application stopped with error", "error", err)
 		return 1
 	}

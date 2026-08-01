@@ -52,7 +52,7 @@ func (r *Runner) checkSubscriptions(ctx context.Context) {
 			subscription.MediaType,
 		); err != nil {
 			r.metrics.notificationFailures.Add(1)
-			r.logger.Error("send completion dm", "request_id", subscription.RequestID, "discord_id", subscription.DiscordID, "error", err)
+			r.logger.Error("send completion dm", "request_id", subscription.RequestID, "error", err)
 			continue
 		}
 		completedAt := time.Now().UTC()
@@ -62,12 +62,12 @@ func (r *Runner) checkSubscriptions(ctx context.Context) {
 		completed, ok, err := r.store.CompleteSubscription(ctx, subscription.RequestID, subscription.DiscordID, completedAt)
 		if err != nil {
 			r.metrics.monitorFailures.Add(1)
-			r.logger.Error("complete subscription", "request_id", subscription.RequestID, "discord_id", subscription.DiscordID, "error", err)
+			r.logger.Error("complete subscription", "request_id", subscription.RequestID, "error", err)
 			continue
 		}
 		if ok {
 			r.metrics.completedSubscriptions.Add(1)
-			r.logger.Info("completion dm sent", "request_id", completed.RequestID, "discord_id", completed.DiscordID)
+			r.logger.Info("completion dm sent", "request_id", completed.RequestID)
 		}
 	}
 }

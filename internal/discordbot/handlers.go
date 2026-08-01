@@ -61,7 +61,8 @@ func (b *Bot) handleRequest(s interactionSession, i *discordgo.InteractionCreate
 	results, err := b.handler.Search(ctx, query)
 	if err != nil {
 		b.edit(s, i, "Seerr search failed. Try again in a minute.")
-		b.logger.Error("seer search failed", "query", query, "error", err)
+		// Search text is user-controlled and may itself contain private data.
+		b.logger.Error("seer search failed", "error", err)
 		return
 	}
 	options := make([]discordgo.SelectMenuOption, 0, 25)
@@ -135,7 +136,7 @@ func (b *Bot) handlePick(s interactionSession, i *discordgo.InteractionCreate, d
 	if !quotaKnown {
 		quota, quotaErr = b.handler.Quota(ctx, ownerID)
 		if quotaErr != nil {
-			b.logger.Warn("seer quota lookup failed", "discord_id", ownerID, "error", quotaErr)
+			b.logger.Warn("seer quota lookup failed", "error", quotaErr)
 		} else if !b.cache.setQuota(cacheID, ownerID, quota) {
 			b.edit(s, i, "That picker expired. Run `/request` again.")
 			return
@@ -277,7 +278,7 @@ func (b *Bot) handleConfirm(s interactionSession, i *discordgo.InteractionCreate
 			message = userErr.UserMessage()
 		}
 		b.edit(s, i, truncate(message, 180))
-		b.logger.Error("request media failed", "discord_id", ownerID, "media_type", result.MediaType, "media_id", result.ID, "error", err)
+		b.logger.Error("request media failed", "media_type", result.MediaType, "media_id", result.ID, "error", err)
 		return
 	}
 	title := escapeMarkdown(optionLabel(result))

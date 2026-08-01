@@ -277,6 +277,12 @@ func TestHealthHandlers(t *testing.T) {
 	if !strings.Contains(metricsResponse.Body.String(), `"searches":3`) {
 		t.Fatalf("metrics response = %s, want searches counter", metricsResponse.Body.String())
 	}
+	if got := metricsResponse.Header().Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("Cache-Control = %q, want no-store", got)
+	}
+	if got := metricsResponse.Header().Get("Content-Security-Policy"); !strings.Contains(got, "default-src 'none'") {
+		t.Fatalf("Content-Security-Policy = %q, want restrictive policy", got)
+	}
 }
 
 func TestReadinessRequiresStartedRunnerAndGET(t *testing.T) {
