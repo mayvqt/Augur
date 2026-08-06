@@ -9,17 +9,32 @@ import (
 	"github.com/mayvqt/Augur/internal/seer"
 )
 
-func completionEmbed(title, mediaType string) *discordgo.MessageEmbed {
-	title = normalizeInlineText(title)
+func completionEmbed(result seer.SearchResult) *discordgo.MessageEmbed {
+	title := normalizeInlineText(result.Title)
 	if title == "" {
 		title = "Requested media"
 	}
-	return &discordgo.MessageEmbed{
-		Title:       "Now available",
-		Description: fmt.Sprintf("**%s** is now fully available.", escapeMarkdown(title)),
-		Color:       0x57f287,
-		Footer:      &discordgo.MessageEmbedFooter{Text: mediaTypeLabel(mediaType)},
+	if year := releaseYear(result); year != "" {
+		title += " (" + year + ")"
 	}
+	embed := &discordgo.MessageEmbed{
+		Title:       fmt.Sprintf("%s Request Now Available: %s", mediaTypeLabel(result.MediaType), title),
+		Description: truncate(normalizeInlineText(result.Overview), 4000),
+		Color:       0x57f287,
+	}
+	if embed.Description == "" {
+		embed.Description = "This title is now fully available."
+	}
+	if strings.TrimSpace(result.PosterPath) != "" {
+		embed.Thumbnail = &discordgo.MessageEmbedThumbnail{URL: "https://image.tmdb.org/t/p/w342" + result.PosterPath}
+	}
+	if language := strings.TrimSpace(result.OriginalLanguage); language != "" {
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Language", Value: languageLabel(language), Inline: true})
+	}
+	if validRating(result.VoteAverage) {
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Rating", Value: ratingLabel(result.VoteAverage), Inline: true})
+	}
+	return embed
 }
 
 func (b *Bot) mediaPreview(result seer.SearchResult, quota *seer.Quota) *discordgo.MessageEmbed {

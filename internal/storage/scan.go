@@ -30,7 +30,9 @@ func scanSubscription(scanner subscriptionScanner) (Subscription, error) {
 	var subscription Subscription
 	var createdAt string
 	var completedAt sql.NullString
-	if err := scanner.Scan(&subscription.RequestID, &subscription.DiscordID, &subscription.Title, &subscription.MediaType, &createdAt, &completedAt); err != nil {
+	if err := scanner.Scan(&subscription.RequestID, &subscription.DiscordID, &subscription.Title, &subscription.MediaType,
+		&subscription.Overview, &subscription.PosterPath, &subscription.ReleaseYear, &subscription.Language, &subscription.Rating,
+		&createdAt, &completedAt); err != nil {
 		return Subscription{}, err
 	}
 	parsedCreatedAt, err := parseTime(createdAt)

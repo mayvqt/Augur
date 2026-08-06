@@ -163,8 +163,7 @@ func (f *fakeStore) Close() error {
 
 type notification struct {
 	discordID string
-	title     string
-	mediaType string
+	media     seer.SearchResult
 }
 
 type fakeNotifier struct {
@@ -176,7 +175,7 @@ func (f *fakeNotifier) Start(ctx context.Context) error {
 	return ctx.Err()
 }
 
-func (f *fakeNotifier) NotifyComplete(ctx context.Context, discordID, title, mediaType string) error {
+func (f *fakeNotifier) NotifyComplete(ctx context.Context, discordID string, media seer.SearchResult) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -185,8 +184,7 @@ func (f *fakeNotifier) NotifyComplete(ctx context.Context, discordID, title, med
 	}
 	f.notifications = append(f.notifications, notification{
 		discordID: discordID,
-		title:     title,
-		mediaType: mediaType,
+		media:     media,
 	})
 	return nil
 }
