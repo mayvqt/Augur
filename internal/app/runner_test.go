@@ -238,6 +238,26 @@ func TestRunnerChecksSubscriptionsRetriesAndNotifies(t *testing.T) {
 	}
 }
 
+func TestRunnerBackfillsLegacySubscriptionMetadataBeforeNotifying(t *testing.T) {
+	t.Parallel()
+	store := &fakeStore{pending: []storage.Subscription{{RequestID: 44, DiscordID: "123456789012345678", Title: "Arrival", MediaType: "movie"}}}
+	notifier := &fakeNotifier{}
+	seerClient := &fakeSeer{
+		requestByID:  map[int]seer.Request{44: {ID: 44, Media: &seer.Media{TMDBID: 329865, Status: "available"}}},
+		mediaDetails: seer.SearchResult{Title: "Arrival", Overview: "A linguist works with the military.", PosterPath: "/arrival.jpg", OriginalLanguage: "en", ReleaseDate: "2016-11-10", VoteAverage: 7.6},
+	}
+	runner := newTestRunner(testConfig(), seerClient, store, notifier)
+
+	runner.checkSubscriptions(context.Background())
+
+	if seerClient.mediaDetailsCalls != 1 {
+		t.Fatalf("media details calls = %d, want 1", seerClient.mediaDetailsCalls)
+	}
+	if len(notifier.notifications) != 1 || notifier.notifications[0].media.Overview == "" || notifier.notifications[0].media.MediaType != "movie" {
+		t.Fatalf("notification = %#v, want backfilled movie metadata", notifier.notifications)
+	}
+}
+
 func TestRunnerKeepsSubscriptionPendingWhenNotificationFails(t *testing.T) {
 	t.Parallel()
 	store := &fakeStore{pending: []storage.Subscription{{

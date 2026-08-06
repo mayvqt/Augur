@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/mayvqt/Augur/internal/seer"
+	"github.com/mayvqt/Augur/internal/storage"
 )
 
 func (r *Runner) runMonitor(ctx context.Context) {
@@ -45,15 +46,25 @@ func (r *Runner) checkSubscriptions(ctx context.Context) {
 		if !seer.IsAvailable(req) {
 			continue
 		}
+		media := subscriptionMedia(subscription)
+		if missingMediaMetadata(media) && req.Media != nil && req.Media.TMDBID > 0 {
+			details, err := r.seer.MediaDetails(ctx, subscription.MediaType, req.Media.TMDBID)
+			if err != nil {
+				r.metrics.monitorFailures.Add(1)
+				r.logger.Error("load media details for completion dm", "request_id", subscription.RequestID, "error", err)
+				continue
+			}
+			details.MediaType = subscription.MediaType
+			details.Title = displayTitle(details)
+			if details.Title == "" {
+				details.Title = subscription.Title
+			}
+			media = details
+		}
 		if err := r.bot.NotifyComplete(
 			ctx,
 			subscription.DiscordID,
-			seer.SearchResult{
-				Title: subscription.Title, MediaType: subscription.MediaType,
-				Overview: subscription.Overview, PosterPath: subscription.PosterPath,
-				OriginalLanguage: subscription.Language, VoteAverage: subscription.Rating,
-				ReleaseDate: subscription.ReleaseYear,
-			},
+			media,
 		); err != nil {
 			r.metrics.notificationFailures.Add(1)
 			r.logger.Error("send completion dm", "request_id", subscription.RequestID, "error", err)
@@ -74,6 +85,20 @@ func (r *Runner) checkSubscriptions(ctx context.Context) {
 			r.logger.Info("completion dm sent", "request_id", completed.RequestID)
 		}
 	}
+}
+
+func subscriptionMedia(subscription storage.Subscription) seer.SearchResult {
+	return seer.SearchResult{
+		Title: subscription.Title, MediaType: subscription.MediaType,
+		Overview: subscription.Overview, PosterPath: subscription.PosterPath,
+		OriginalLanguage: subscription.Language, VoteAverage: subscription.Rating,
+		ReleaseDate: subscription.ReleaseYear,
+	}
+}
+
+func missingMediaMetadata(media seer.SearchResult) bool {
+	return media.Overview == "" && media.PosterPath == "" && media.OriginalLanguage == "" &&
+		media.VoteAverage == 0 && releaseYear(media) == ""
 }
 
 func (r *Runner) requestWithRetry(ctx context.Context, requestID int) (seer.Request, error) {

@@ -108,6 +108,7 @@ type Request struct {
 }
 
 type Media struct {
+	TMDBID int `json:"tmdbId"`
 	Status any `json:"status"`
 }
 
@@ -303,6 +304,24 @@ func (c *Client) TVDetails(ctx context.Context, mediaID int) (TVDetails, error) 
 		return seasons[i].SeasonNumber < seasons[j].SeasonNumber
 	})
 	out.Seasons = seasons
+	return out, nil
+}
+
+func (c *Client) MediaDetails(ctx context.Context, mediaType string, mediaID int) (SearchResult, error) {
+	if mediaID <= 0 {
+		return SearchResult{}, errors.New("media ID must be positive")
+	}
+	if mediaType != "movie" && mediaType != "tv" {
+		return SearchResult{}, fmt.Errorf("unsupported media type %q", mediaType)
+	}
+	var out SearchResult
+	if err := c.do(ctx, http.MethodGet, "/api/v1/"+mediaType+"/"+strconv.Itoa(mediaID), nil, &out); err != nil {
+		return SearchResult{}, err
+	}
+	out.MediaType = mediaType
+	if out.ID == 0 {
+		out.ID = mediaID
+	}
 	return out, nil
 }
 

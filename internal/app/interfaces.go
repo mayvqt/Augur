@@ -13,6 +13,7 @@ type seerClient interface {
 	FindUserByDiscordID(ctx context.Context, discordID string) (seer.User, bool, error)
 	UserQuota(ctx context.Context, userID int) (seer.Quota, error)
 	TVDetails(ctx context.Context, mediaID int) (seer.TVDetails, error)
+	MediaDetails(ctx context.Context, mediaType string, mediaID int) (seer.SearchResult, error)
 	RequestMedia(ctx context.Context, userID int, mediaType string, mediaID int, seasons seer.SeasonSelection) (seer.Request, error)
 	Request(ctx context.Context, id int) (seer.Request, error)
 }
