@@ -12,16 +12,19 @@ import (
 
 func TestCompletionEmbedIncludesMediaMetadata(t *testing.T) {
 	t.Parallel()
-	embed := completionEmbed("The Lion King", "movie")
+	embed := completionEmbed(seer.SearchResult{Title: "The Lion King", MediaType: "movie", ReleaseDate: "1994-06-24", Overview: "A young lion finds his place.", PosterPath: "/lion.jpg", OriginalLanguage: "en", VoteAverage: 8.5})
 
-	if embed.Title != "Now available" {
+	if embed.Title != "Movie Request Now Available: The Lion King (1994)" {
 		t.Fatalf("title = %q", embed.Title)
 	}
-	if embed.Description != "**The Lion King** is now fully available." {
+	if embed.Description != "A young lion finds his place." {
 		t.Fatalf("description = %q", embed.Description)
 	}
-	if embed.Footer == nil || embed.Footer.Text != "Movie" {
-		t.Fatalf("footer = %#v", embed.Footer)
+	if embed.Thumbnail == nil || embed.Thumbnail.URL != "https://image.tmdb.org/t/p/w342/lion.jpg" {
+		t.Fatalf("thumbnail = %#v", embed.Thumbnail)
+	}
+	if len(embed.Fields) != 2 || embed.Fields[0].Name != "Language" || embed.Fields[1].Name != "Rating" {
+		t.Fatalf("fields = %#v", embed.Fields)
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/mayvqt/Augur/internal/seer"
 )
 
 func (b *Bot) Start(ctx context.Context) error {
@@ -38,7 +39,7 @@ func (b *Bot) Close() error {
 	return b.session.Close()
 }
 
-func (b *Bot) NotifyComplete(ctx context.Context, discordID, title, mediaType string) error {
+func (b *Bot) NotifyComplete(ctx context.Context, discordID string, media seer.SearchResult) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -49,7 +50,7 @@ func (b *Bot) NotifyComplete(ctx context.Context, discordID, title, mediaType st
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	embed := completionEmbed(title, mediaType)
+	embed := completionEmbed(media)
 	_, err = b.session.ChannelMessageSendComplex(channel.ID, &discordgo.MessageSend{
 		Embeds:          []*discordgo.MessageEmbed{embed},
 		AllowedMentions: noMentions(),

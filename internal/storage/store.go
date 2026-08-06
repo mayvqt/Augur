@@ -16,6 +16,11 @@ type Subscription struct {
 	DiscordID   string    `json:"discord_id"`
 	Title       string    `json:"title"`
 	MediaType   string    `json:"media_type"`
+	Overview    string    `json:"overview,omitempty"`
+	PosterPath  string    `json:"poster_path,omitempty"`
+	ReleaseYear string    `json:"release_year,omitempty"`
+	Language    string    `json:"language,omitempty"`
+	Rating      float64   `json:"rating,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
 	CompletedAt time.Time `json:"completed_at,omitempty"`
 }
@@ -97,10 +102,12 @@ func (s *Store) AddSubscription(ctx context.Context, subscription Subscription) 
 		return false, errors.New("completed_at must not be before created_at")
 	}
 	result, err := s.db.ExecContext(ctx, `
-		INSERT INTO subscriptions (request_id, discord_id, title, media_type, created_at, completed_at)
-		VALUES (?, ?, ?, ?, ?, NULLIF(?, ''))
+		INSERT INTO subscriptions (request_id, discord_id, title, media_type, overview, poster_path, release_year, language, rating, created_at, completed_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''))
 		ON CONFLICT(request_id, discord_id) DO NOTHING
-	`, subscription.RequestID, subscription.DiscordID, subscription.Title, subscription.MediaType, formatTime(createdAt), formatNullableTime(subscription.CompletedAt))
+	`, subscription.RequestID, subscription.DiscordID, subscription.Title, subscription.MediaType, subscription.Overview,
+		subscription.PosterPath, subscription.ReleaseYear, subscription.Language, subscription.Rating,
+		formatTime(createdAt), formatNullableTime(subscription.CompletedAt))
 	if err != nil {
 		return false, fmt.Errorf("insert subscription: %w", err)
 	}
@@ -119,7 +126,7 @@ func (s *Store) PendingSubscriptions(ctx context.Context) ([]Subscription, error
 		return nil, err
 	}
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT request_id, discord_id, title, media_type, created_at, completed_at
+		SELECT request_id, discord_id, title, media_type, overview, poster_path, release_year, language, rating, created_at, completed_at
 		FROM subscriptions
 		WHERE completed_at IS NULL
 		ORDER BY created_at, request_id
@@ -153,7 +160,7 @@ func (s *Store) CompleteSubscription(ctx context.Context, requestID int, discord
 		UPDATE subscriptions
 		SET completed_at = ?
 		WHERE request_id = ? AND discord_id = ? AND completed_at IS NULL
-		RETURNING request_id, discord_id, title, media_type, created_at, completed_at
+		RETURNING request_id, discord_id, title, media_type, overview, poster_path, release_year, language, rating, created_at, completed_at
 	`, formatTime(completedAt), requestID, discordID)
 	subscription, ok, err := scanOptionalSubscription(row)
 	if err != nil {
@@ -193,6 +200,17 @@ func (s *Store) initialize(ctx context.Context) error {
 			ON subscriptions(completed_at, created_at, request_id);
 	`); err != nil {
 		return fmt.Errorf("initialize schema: %w", err)
+	}
+	for _, column := range []string{
+		"overview TEXT NOT NULL DEFAULT ''",
+		"poster_path TEXT NOT NULL DEFAULT ''",
+		"release_year TEXT NOT NULL DEFAULT ''",
+		"language TEXT NOT NULL DEFAULT ''",
+		"rating REAL NOT NULL DEFAULT 0",
+	} {
+		if _, err := s.db.ExecContext(ctx, "ALTER TABLE subscriptions ADD COLUMN "+column); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+			return fmt.Errorf("add subscription metadata column: %w", err)
+		}
 	}
 	return nil
 }

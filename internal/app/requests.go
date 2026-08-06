@@ -120,11 +120,16 @@ func (r *Runner) Request(ctx context.Context, discordID string, result seer.Sear
 		return seer.Request{}, errors.New("Seerr returned a request without a valid ID")
 	}
 	inserted, err := r.store.AddSubscription(ctx, storage.Subscription{
-		RequestID: req.ID,
-		DiscordID: discordID,
-		Title:     displayTitle(result),
-		MediaType: result.MediaType,
-		CreatedAt: time.Now().UTC(),
+		RequestID:   req.ID,
+		DiscordID:   discordID,
+		Title:       displayTitle(result),
+		MediaType:   result.MediaType,
+		Overview:    result.Overview,
+		PosterPath:  result.PosterPath,
+		ReleaseYear: releaseYear(result),
+		Language:    result.OriginalLanguage,
+		Rating:      result.VoteAverage,
+		CreatedAt:   time.Now().UTC(),
 	})
 	if err != nil {
 		r.metrics.requestFailures.Add(1)
@@ -134,6 +139,17 @@ func (r *Runner) Request(ctx context.Context, discordID string, result seer.Sear
 		r.metrics.duplicateSubscriptions.Add(1)
 	}
 	return req, nil
+}
+
+func releaseYear(result seer.SearchResult) string {
+	date := result.ReleaseDate
+	if date == "" {
+		date = result.FirstAirDate
+	}
+	if len(date) >= 4 {
+		return date[:4]
+	}
+	return ""
 }
 
 func (r *Runner) requireLinkedUser(ctx context.Context, discordID string) (seer.User, error) {
