@@ -127,13 +127,13 @@ func New(cfg Config) (*Client, error) {
 		parsed.RawQuery != "" ||
 		parsed.ForceQuery ||
 		parsed.Fragment != "" {
-		return nil, errors.New("Seerr base URL must be an absolute http or https URL without credentials, query parameters, or a fragment")
+		return nil, errors.New("seerr base URL must be an absolute http or https URL without credentials, query parameters, or a fragment")
 	}
 	if cfg.APIKey == "" {
-		return nil, errors.New("Seerr API key is required")
+		return nil, errors.New("seerr API key is required")
 	}
 	if cfg.Timeout <= 0 {
-		return nil, errors.New("Seerr timeout must be positive")
+		return nil, errors.New("seerr timeout must be positive")
 	}
 	return &Client{
 		baseURL: cfg.BaseURL,
@@ -211,7 +211,7 @@ func (c *Client) FindUserByDiscordID(ctx context.Context, discordID string) (Use
 			}
 			if settings.HasDiscordID(discordID) {
 				if matched.ID != 0 && matched.ID != user.ID {
-					return User{}, false, fmt.Errorf("Discord ID is linked to multiple Seerr users (%d and %d)", matched.ID, user.ID)
+					return User{}, false, fmt.Errorf("discord ID is linked to multiple seerr users (%d and %d)", matched.ID, user.ID)
 				}
 				matched = user
 			}
@@ -220,10 +220,10 @@ func (c *Client) FindUserByDiscordID(ctx context.Context, discordID string) (Use
 			return matched, matched.ID != 0, nil
 		}
 		if skip > math.MaxInt-100 {
-			return User{}, false, errors.New("Seerr user pagination overflowed")
+			return User{}, false, errors.New("seerr user pagination overflowed")
 		}
 		if len(seenUsers) <= skip {
-			return User{}, false, errors.New("Seerr user pagination did not advance")
+			return User{}, false, errors.New("seerr user pagination did not advance")
 		}
 	}
 }
@@ -275,7 +275,7 @@ func (c *Client) RequestMedia(ctx context.Context, userID int, mediaType string,
 		return Request{}, err
 	}
 	if out.ID <= 0 {
-		return Request{}, errors.New("Seerr create-request response is missing a valid request ID")
+		return Request{}, errors.New("seerr create-request response is missing a valid request ID")
 	}
 	return out, nil
 }
@@ -335,7 +335,7 @@ func (c *Client) Request(ctx context.Context, id int) (Request, error) {
 		return Request{}, err
 	}
 	if out.ID != id {
-		return Request{}, fmt.Errorf("Seerr request response ID is %d, expected %d", out.ID, id)
+		return Request{}, fmt.Errorf("seerr request response ID is %d, expected %d", out.ID, id)
 	}
 	return out, nil
 }

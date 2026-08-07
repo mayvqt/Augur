@@ -1,10 +1,31 @@
 package discordbot
 
 import (
+	"strconv"
 	"testing"
+	"time"
 
 	"github.com/mayvqt/Augur/internal/seer"
 )
+
+func TestSelectionCacheBoundsEntriesByEvictingOldest(t *testing.T) {
+	cache := &selectionCache{searches: make(map[string]*cachedSearch, selectionMaxEntries)}
+	base := time.Now()
+	for i := 0; i < selectionMaxEntries; i++ {
+		cache.searches[strconv.Itoa(i)] = &cachedSearch{ownerID: "owner", expiresAt: base.Add(selectionTTL + time.Duration(i)*time.Second)}
+	}
+	cache.set("new", "owner", []seer.SearchResult{{ID: 1, MediaType: "movie"}})
+
+	if len(cache.searches) != selectionMaxEntries {
+		t.Fatalf("cache entries = %d, want %d", len(cache.searches), selectionMaxEntries)
+	}
+	if _, ok := cache.searches["0"]; ok {
+		t.Fatal("oldest cache entry was not evicted")
+	}
+	if _, ok := cache.searches["new"]; !ok {
+		t.Fatal("new cache entry was unexpectedly evicted")
+	}
+}
 
 func TestSelectionCacheSession(t *testing.T) {
 	t.Parallel()

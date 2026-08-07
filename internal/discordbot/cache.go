@@ -11,7 +11,10 @@ import (
 	"github.com/mayvqt/Augur/internal/seer"
 )
 
-const selectionTTL = 15 * time.Minute
+const (
+	selectionTTL        = 15 * time.Minute
+	selectionMaxEntries = 10_000
+)
 
 type selectionCache struct {
 	mu       sync.Mutex
@@ -51,6 +54,7 @@ func (c *selectionCache) set(cacheID, ownerID string, results []seer.SearchResul
 		results:   selections,
 	}
 	c.pruneLocked()
+	c.evictOldestLocked()
 }
 
 func (c *selectionCache) get(cacheID, key, ownerID string) (seer.SearchResult, bool) {
@@ -193,6 +197,20 @@ func (c *selectionCache) pruneLocked() {
 		if !now.Before(search.expiresAt) {
 			delete(c.searches, cacheID)
 		}
+	}
+}
+
+func (c *selectionCache) evictOldestLocked() {
+	for len(c.searches) > selectionMaxEntries {
+		var oldestID string
+		var oldestExpiry time.Time
+		for cacheID, search := range c.searches {
+			if oldestID == "" || search.expiresAt.Before(oldestExpiry) {
+				oldestID = cacheID
+				oldestExpiry = search.expiresAt
+			}
+		}
+		delete(c.searches, oldestID)
 	}
 }
 

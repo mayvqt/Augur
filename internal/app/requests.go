@@ -117,7 +117,7 @@ func (r *Runner) Request(ctx context.Context, discordID string, result seer.Sear
 	}
 	if req.ID <= 0 {
 		r.metrics.requestFailures.Add(1)
-		return seer.Request{}, errors.New("Seerr returned a request without a valid ID")
+		return seer.Request{}, errors.New("seerr returned a request without a valid ID")
 	}
 	inserted, err := r.store.AddSubscription(ctx, storage.Subscription{
 		RequestID:   req.ID,

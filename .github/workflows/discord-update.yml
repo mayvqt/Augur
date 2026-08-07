@@ -73,9 +73,9 @@ jobs:
           title="${INPUT_TITLE}"
           if [ -z "$title" ]; then
             if [ "$version" = "latest" ]; then
-              title="Augur update"
+              title="Request Bot Update"
             else
-              title="Augur update ${version}"
+              title="Request Bot Update ${version}"
             fi
           fi
 
@@ -153,7 +153,7 @@ jobs:
           node <<'NODE'
           const webhook = process.env.DISCORD_WEBHOOK_URL;
           const version = process.env.ANNOUNCE_VERSION || "latest";
-          const title = process.env.ANNOUNCE_TITLE || (version === "latest" ? "Augur update" : `Augur update ${version}`);
+          const title = process.env.ANNOUNCE_TITLE || (version === "latest" ? "Request Bot Update" : `Request Bot Update ${version}`);
           const notes = (process.env.ANNOUNCE_SUMMARY || "").trim();
           const changes = (process.env.ANNOUNCE_CHANGES || "")
             .split(/\r?\n/)
@@ -167,7 +167,7 @@ jobs:
           const noteText = notes ? `${notes}\n\n${changeText}` : changeText;
 
           const payload = {
-            username: "Augur Updates",
+            username: "Augur",
             allowed_mentions: { parse: [] },
             embeds: [
               {

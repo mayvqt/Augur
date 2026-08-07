@@ -304,7 +304,7 @@ func parseSeasonValues(values []string) (seer.SeasonSelection, error) {
 	for _, value := range values {
 		number, err := strconv.Atoi(value)
 		if err != nil || number < 0 {
-			return seer.SeasonSelection{}, errors.New("The selected seasons are invalid. Run `/request` again.")
+			return seer.SeasonSelection{}, errors.New("the selected seasons are invalid; run `/request` again")
 		}
 		if _, duplicate := seen[number]; duplicate {
 			continue
@@ -313,7 +313,7 @@ func parseSeasonValues(values []string) (seer.SeasonSelection, error) {
 		selection.Numbers = append(selection.Numbers, number)
 	}
 	if len(selection.Numbers) == 0 {
-		return seer.SeasonSelection{}, errors.New("Select at least one season.")
+		return seer.SeasonSelection{}, errors.New("select at least one season")
 	}
 	sort.Ints(selection.Numbers)
 	return selection, nil
@@ -331,12 +331,12 @@ func componentSelection(customID, prefix string) (cacheID, key string, ok bool) 
 func validatePickerSelection(selection seer.SeasonSelection, quota *seer.Quota) error {
 	if selection.All {
 		if quota == nil || quota.TV.Restricted {
-			return errors.New("All seasons is only available with an unlimited TV request limit.")
+			return errors.New("all seasons are only available with an unlimited TV request limit")
 		}
 		return nil
 	}
 	if quota != nil && quota.TV.Restricted && len(selection.Numbers) > quota.TV.Remaining {
-		return fmt.Errorf("You can select up to %d more TV season(s).", quota.TV.Remaining)
+		return fmt.Errorf("you can select up to %d more TV season(s)", quota.TV.Remaining)
 	}
 	return nil
 }
