@@ -1,6 +1,6 @@
 module github.com/mayvqt/Augur
 
-go 1.26.4
+go 1.26.5
 
 require (
 	github.com/bwmarrin/discordgo v0.29.0
