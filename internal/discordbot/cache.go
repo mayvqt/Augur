@@ -23,6 +23,7 @@ type selectionCache struct {
 
 type cachedSearch struct {
 	ownerID    string
+	query      string
 	expiresAt  time.Time
 	results    []cachedSelection
 	quota      *seer.Quota
@@ -30,8 +31,9 @@ type cachedSearch struct {
 }
 
 type cachedSelection struct {
-	result  seer.SearchResult
-	seasons seer.SeasonSelection
+	result           seer.SearchResult
+	availableSeasons []seer.Season
+	selectedSeasons  seer.SeasonSelection
 }
 
 type cachedResultOption struct {
@@ -39,7 +41,7 @@ type cachedResultOption struct {
 	result seer.SearchResult
 }
 
-func (c *selectionCache) set(cacheID, ownerID string, results []seer.SearchResult) {
+func (c *selectionCache) set(cacheID, ownerID, query string, results []seer.SearchResult) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.initLocked()
@@ -50,11 +52,37 @@ func (c *selectionCache) set(cacheID, ownerID string, results []seer.SearchResul
 	}
 	c.searches[cacheID] = &cachedSearch{
 		ownerID:   ownerID,
+		query:     query,
 		expiresAt: time.Now().Add(selectionTTL),
 		results:   selections,
 	}
 	c.pruneLocked()
 	c.evictOldestLocked()
+}
+
+func (c *selectionCache) setResults(cacheID, ownerID string, results []seer.SearchResult) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	search, ok := c.searchLocked(cacheID, ownerID)
+	if !ok {
+		return false
+	}
+	search.results = make([]cachedSelection, len(results))
+	for index, result := range results {
+		search.results[index].result = result
+	}
+	search.expiresAt = time.Now().Add(selectionTTL)
+	return true
+}
+
+func (c *selectionCache) query(cacheID, ownerID string) (string, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	search, ok := c.searchLocked(cacheID, ownerID)
+	if !ok {
+		return "", false
+	}
+	return search.query, true
 }
 
 func (c *selectionCache) get(cacheID, key, ownerID string) (seer.SearchResult, bool) {
@@ -127,28 +155,35 @@ func (c *selectionCache) setSeasons(cacheID, key, ownerID string, seasons seer.S
 	if !ok {
 		return false
 	}
-	selection.seasons = seer.SeasonSelection{
+	selection.selectedSeasons = seer.SeasonSelection{
 		Numbers: append([]int(nil), seasons.Numbers...),
 		All:     seasons.All,
 	}
 	return true
 }
 
-func (c *selectionCache) take(cacheID, key, ownerID string) (seer.SearchResult, seer.SeasonSelection, bool) {
+func (c *selectionCache) setAvailableSeasons(cacheID, key, ownerID string, seasons []seer.Season) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-
 	selection, ok := c.selectionLocked(cacheID, key, ownerID)
 	if !ok {
-		return seer.SearchResult{}, seer.SeasonSelection{}, false
+		return false
 	}
-	result := selection.result
-	seasons := seer.SeasonSelection{
-		Numbers: append([]int(nil), selection.seasons.Numbers...),
-		All:     selection.seasons.All,
+	selection.availableSeasons = append([]seer.Season(nil), seasons...)
+	return true
+}
+
+func (c *selectionCache) selection(cacheID, key, ownerID string) (seer.SearchResult, []seer.Season, seer.SeasonSelection, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	selection, ok := c.selectionLocked(cacheID, key, ownerID)
+	if !ok {
+		return seer.SearchResult{}, nil, seer.SeasonSelection{}, false
 	}
-	delete(c.searches, cacheID)
-	return result, seasons, true
+	return selection.result, append([]seer.Season(nil), selection.availableSeasons...), seer.SeasonSelection{
+		Numbers: append([]int(nil), selection.selectedSeasons.Numbers...),
+		All:     selection.selectedSeasons.All,
+	}, true
 }
 
 func (c *selectionCache) discard(cacheID, ownerID string) {

@@ -14,7 +14,7 @@ func TestSelectionCacheBoundsEntriesByEvictingOldest(t *testing.T) {
 	for i := 0; i < selectionMaxEntries; i++ {
 		cache.searches[strconv.Itoa(i)] = &cachedSearch{ownerID: "owner", expiresAt: base.Add(selectionTTL + time.Duration(i)*time.Second)}
 	}
-	cache.set("new", "owner", []seer.SearchResult{{ID: 1, MediaType: "movie"}})
+	cache.set("new", "owner", "query", []seer.SearchResult{{ID: 1, MediaType: "movie"}})
 
 	if len(cache.searches) != selectionMaxEntries {
 		t.Fatalf("cache entries = %d, want %d", len(cache.searches), selectionMaxEntries)
@@ -30,7 +30,7 @@ func TestSelectionCacheBoundsEntriesByEvictingOldest(t *testing.T) {
 func TestSelectionCacheSession(t *testing.T) {
 	t.Parallel()
 	var cache selectionCache
-	cache.set("search", "owner", []seer.SearchResult{
+	cache.set("search", "owner", "query", []seer.SearchResult{
 		{ID: 10, MediaType: "movie", Title: "One"},
 		{ID: 11, MediaType: "tv", Name: "Two"},
 	})
@@ -64,17 +64,40 @@ func TestSelectionCacheSession(t *testing.T) {
 	if !cache.setSeasons("search", "1", "owner", seer.SeasonSelection{Numbers: []int{1, 3}}) {
 		t.Fatal("owner could not store selected seasons")
 	}
-	_, seasons, ok := cache.take("search", "1", "owner")
+	available := []seer.Season{{SeasonNumber: 1}, {SeasonNumber: 3}}
+	if !cache.setAvailableSeasons("search", "1", "owner", available) {
+		t.Fatal("owner could not store available seasons")
+	}
+	_, gotAvailable, seasons, ok := cache.selection("search", "1", "owner")
 	if !ok {
-		t.Fatal("owner could not consume the selection")
+		t.Fatal("owner could not read the selection")
+	}
+	if len(gotAvailable) != 2 || gotAvailable[1].SeasonNumber != 3 {
+		t.Fatalf("available seasons = %#v", gotAvailable)
 	}
 	if len(seasons.Numbers) != 2 || seasons.Numbers[0] != 1 || seasons.Numbers[1] != 3 {
 		t.Fatalf("selected seasons = %#v", seasons)
 	}
-	if _, _, ok := cache.take("search", "1", "owner"); ok {
-		t.Fatal("cache allowed the confirmation to be used twice")
+	cache.discard("search", "owner")
+	if _, _, _, ok := cache.selection("search", "1", "owner"); ok {
+		t.Fatal("discard did not invalidate the search")
 	}
-	if _, _, ok := cache.take("search", "0", "owner"); ok {
-		t.Fatal("cache allowed a second choice from a consumed picker")
+}
+
+func TestSelectionCacheUpdatesResultsWithoutLosingSearchState(t *testing.T) {
+	t.Parallel()
+	var cache selectionCache
+	cache.set("search", "owner", "alien", nil)
+	quota := &seer.Quota{Movie: seer.QuotaUsage{Remaining: 2}}
+	cache.setQuota("search", "owner", quota)
+
+	if !cache.setResults("search", "owner", []seer.SearchResult{{ID: 1, MediaType: "movie"}}) {
+		t.Fatal("could not update search results")
+	}
+	if query, ok := cache.query("search", "owner"); !ok || query != "alien" {
+		t.Fatalf("query = %q, %t", query, ok)
+	}
+	if got, ok := cache.getQuota("search", "owner"); !ok || got.Movie.Remaining != 2 {
+		t.Fatalf("quota = %#v, %t", got, ok)
 	}
 }

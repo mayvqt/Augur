@@ -33,6 +33,7 @@ coverage.*
 # Local agent state
 .agents/
 .codex/
+/AGENTS.md
 
 # Editor and OS noise
 .DS_Store

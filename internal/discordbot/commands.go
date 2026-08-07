@@ -9,7 +9,9 @@ const (
 	componentSeasons = "augur:seasons:"
 	componentAll     = "augur:all:"
 	componentConfirm = "augur:confirm:"
-	componentCancel  = "augur:cancel:"
+	componentBack    = "augur:back:"
+	componentRetry   = "augur:retry:"
+	componentSearch  = "augur:retry-search:"
 )
 
 func slashCommands() []*discordgo.ApplicationCommand {

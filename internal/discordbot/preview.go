@@ -44,13 +44,10 @@ func (b *Bot) mediaPreview(result seer.SearchResult, quota *seer.Quota) *discord
 		Color:       0x5865f2,
 		URL:         b.mediaURL(result),
 		Fields: []*discordgo.MessageEmbedField{
-			{Name: "Type", Value: mediaTypeLabel(result.MediaType), Inline: true},
-			{Name: "Language", Value: languageLabel(result.OriginalLanguage), Inline: true},
-			{Name: "Rating", Value: ratingLabel(result.VoteAverage), Inline: true},
 			{Name: "Availability", Value: availabilityLabel(result), Inline: true},
-			{Name: "Request usage", Value: quotaLabel(quota), Inline: false},
+			{Name: "Request usage", Value: relevantQuotaLabel(result.MediaType, quota), Inline: true},
 		},
-		Footer: &discordgo.MessageEmbedFooter{Text: "Review this title, then confirm or cancel the request."},
+		Footer: &discordgo.MessageEmbedFooter{Text: mediaTypeLabel(result.MediaType)},
 	}
 	if strings.TrimSpace(result.PosterPath) != "" {
 		embed.Thumbnail = &discordgo.MessageEmbedThumbnail{URL: "https://image.tmdb.org/t/p/w342" + result.PosterPath}
@@ -65,40 +62,20 @@ func previewComponents(cacheID, key string) []discordgo.MessageComponent {
 	return []discordgo.MessageComponent{discordgo.ActionsRow{Components: []discordgo.MessageComponent{
 		discordgo.Button{
 			CustomID: componentConfirm + cacheID + ":" + key,
-			Label:    "Request",
+			Label:    "Request movie",
 			Style:    discordgo.SuccessButton,
 		},
-		discordgo.Button{
-			CustomID: componentCancel + cacheID,
-			Label:    "Cancel",
-			Style:    discordgo.SecondaryButton,
-		},
+		backButton(cacheID),
 	}}}
 }
 
-func (b *Bot) browsableComponents(
-	cacheID string,
-	selectedKey string,
-	ownerID string,
-	components []discordgo.MessageComponent,
-) []discordgo.MessageComponent {
-	cachedOptions := b.cache.options(cacheID, ownerID)
-	if len(cachedOptions) == 0 {
-		return components
+func (b *Bot) availableComponents(cacheID string, result seer.SearchResult) []discordgo.MessageComponent {
+	buttons := []discordgo.MessageComponent{}
+	if mediaURL := b.mediaURL(result); mediaURL != "" {
+		buttons = append(buttons, discordgo.Button{Label: "Open in Seerr", Style: discordgo.LinkButton, URL: mediaURL})
 	}
-
-	options := make([]discordgo.SelectMenuOption, 0, len(cachedOptions))
-	for _, option := range cachedOptions {
-		options = append(options, discordgo.SelectMenuOption{
-			Label:   truncate(optionLabel(option.result), 100),
-			Value:   option.key,
-			Default: option.key == selectedKey,
-		})
-	}
-	return append(
-		[]discordgo.MessageComponent{resultPickerRow(cacheID, "Choose another title", options)},
-		components...,
-	)
+	buttons = append(buttons, backButton(cacheID))
+	return []discordgo.MessageComponent{discordgo.ActionsRow{Components: buttons}}
 }
 
 func resultPickerRow(cacheID, placeholder string, options []discordgo.SelectMenuOption) discordgo.ActionsRow {
@@ -113,13 +90,13 @@ func resultPickerRow(cacheID, placeholder string, options []discordgo.SelectMenu
 	}}
 }
 
-func seasonPickerComponents(cacheID, key string, seasons []seer.Season, quota *seer.Quota) []discordgo.MessageComponent {
+func seasonPickerComponents(cacheID, key string, seasons []seer.Season, quota *seer.Quota, selected seer.SeasonSelection) []discordgo.MessageComponent {
 	maxSelections := len(seasons)
 	if quota != nil && quota.TV.Restricted && quota.TV.Remaining < maxSelections {
 		maxSelections = quota.TV.Remaining
 	}
 	if maxSelections <= 0 {
-		return cancelComponents(cacheID)
+		return backComponents(cacheID)
 	}
 
 	options := make([]discordgo.SelectMenuOption, 0, min(len(seasons), 25))
@@ -136,10 +113,11 @@ func seasonPickerComponents(cacheID, key string, seasons []seer.Season, quota *s
 			Label:       truncate(label, 100),
 			Description: description,
 			Value:       strconv.Itoa(season.SeasonNumber),
+			Default:     containsSeason(selected.Numbers, season.SeasonNumber),
 		})
 	}
 	if len(options) == 0 {
-		return cancelComponents(cacheID)
+		return backComponents(cacheID)
 	}
 	maxSelections = min(maxSelections, len(options))
 	placeholder := fmt.Sprintf("Choose up to %d season(s)", maxSelections)
@@ -147,15 +125,18 @@ func seasonPickerComponents(cacheID, key string, seasons []seer.Season, quota *s
 	if quota != nil && !quota.TV.Restricted {
 		buttons = append(buttons, discordgo.Button{
 			CustomID: componentAll + cacheID + ":" + key,
-			Label:    "Select all seasons",
+			Label:    "Request all seasons",
 			Style:    discordgo.PrimaryButton,
 		})
 	}
-	buttons = append(buttons, discordgo.Button{
-		CustomID: componentCancel + cacheID,
-		Label:    "Cancel",
-		Style:    discordgo.SecondaryButton,
-	})
+	if len(selected.Numbers) > 0 {
+		buttons = append([]discordgo.MessageComponent{discordgo.Button{
+			CustomID: componentConfirm + cacheID + ":" + key,
+			Label:    "Request selected seasons",
+			Style:    discordgo.SuccessButton,
+		}}, buttons...)
+	}
+	buttons = append(buttons, backButton(cacheID))
 	return []discordgo.MessageComponent{
 		discordgo.ActionsRow{Components: []discordgo.MessageComponent{
 			discordgo.SelectMenu{
@@ -170,14 +151,23 @@ func seasonPickerComponents(cacheID, key string, seasons []seer.Season, quota *s
 	}
 }
 
-func cancelComponents(cacheID string) []discordgo.MessageComponent {
+func backComponents(cacheID string) []discordgo.MessageComponent {
 	return []discordgo.MessageComponent{discordgo.ActionsRow{Components: []discordgo.MessageComponent{
-		discordgo.Button{
-			CustomID: componentCancel + cacheID,
-			Label:    "Cancel",
-			Style:    discordgo.SecondaryButton,
-		},
+		backButton(cacheID),
 	}}}
+}
+
+func backButton(cacheID string) discordgo.Button {
+	return discordgo.Button{CustomID: componentBack + cacheID, Label: "Back to results", Style: discordgo.SecondaryButton}
+}
+
+func containsSeason(numbers []int, wanted int) bool {
+	for _, number := range numbers {
+		if number == wanted {
+			return true
+		}
+	}
+	return false
 }
 
 func seasonLabel(season seer.Season) string {
@@ -229,11 +219,14 @@ func availabilityLabel(result seer.SearchResult) string {
 	return "Not requested"
 }
 
-func quotaLabel(quota *seer.Quota) string {
+func relevantQuotaLabel(mediaType string, quota *seer.Quota) string {
 	if quota == nil {
 		return "Unavailable"
 	}
-	return "Movies: " + quotaUsageLabel(quota.Movie) + "\nTV shows: " + quotaUsageLabel(quota.TV)
+	if mediaType == "tv" {
+		return quotaUsageLabel(quota.TV)
+	}
+	return quotaUsageLabel(quota.Movie)
 }
 
 func quotaUsageLabel(usage seer.QuotaUsage) string {

@@ -76,46 +76,32 @@ func TestSearchOptionUsesTitleAndYear(t *testing.T) {
 	}
 }
 
-func TestBrowsablePreviewKeepsSearchResults(t *testing.T) {
+func TestAvailableTitleOffersSeerrLinkAndBack(t *testing.T) {
 	t.Parallel()
-	bot := &Bot{}
-	bot.cache.set("search", "user", []seer.SearchResult{
-		{Title: "Alien", ReleaseDate: "1979-05-25"},
-		{Title: "Aliens", ReleaseDate: "1986-07-18"},
-	})
-
-	components := bot.browsableComponents(
-		"search",
-		"1",
-		"user",
-		previewComponents("search", "1"),
-	)
-
-	if len(components) != 2 {
-		t.Fatalf("component rows = %d, want picker and request buttons", len(components))
+	bot := &Bot{link: config.LinkConfig{PublicURL: "https://seerr.example.test"}}
+	components := bot.availableComponents("search", seer.SearchResult{ID: 42, MediaType: "movie"})
+	buttons := components[0].(discordgo.ActionsRow).Components
+	if len(buttons) != 2 {
+		t.Fatalf("buttons = %#v, want Seerr link and back", buttons)
 	}
-	menu := components[0].(discordgo.ActionsRow).Components[0].(discordgo.SelectMenu)
-	if len(menu.Options) != 2 {
-		t.Fatalf("picker options = %d, want 2", len(menu.Options))
+	if button := buttons[0].(discordgo.Button); button.Style != discordgo.LinkButton || button.URL != "https://seerr.example.test/movie/42" {
+		t.Fatalf("link button = %#v", button)
 	}
-	if menu.Options[0].Label != "Alien (1979)" || menu.Options[0].Default {
-		t.Fatalf("first option = %#v", menu.Options[0])
-	}
-	if menu.Options[1].Label != "Aliens (1986)" || !menu.Options[1].Default {
-		t.Fatalf("selected option = %#v", menu.Options[1])
+	if button := buttons[1].(discordgo.Button); button.CustomID != componentBack+"search" {
+		t.Fatalf("back button = %#v", button)
 	}
 }
 
-func TestQuotaLabelIncludesUsageAndLimits(t *testing.T) {
+func TestRelevantQuotaLabelOnlyShowsSelectedMediaType(t *testing.T) {
 	t.Parallel()
 	quota := &seer.Quota{
 		Movie: seer.QuotaUsage{Days: 7, Limit: 10, Used: 6, Remaining: 4, Restricted: true},
 		TV:    seer.QuotaUsage{Used: 2},
 	}
-	got := quotaLabel(quota)
-	want := "Movies: 6/10 used · 4 remaining · 7-day window\nTV shows: 2 used · Unlimited"
+	got := relevantQuotaLabel("movie", quota)
+	want := "6/10 used · 4 remaining · 7-day window"
 	if got != want {
-		t.Fatalf("quotaLabel() = %q, want %q", got, want)
+		t.Fatalf("relevantQuotaLabel() = %q, want %q", got, want)
 	}
 }
 
@@ -128,7 +114,7 @@ func TestSeasonPickerEnforcesLimitedQuotaAndHidesAllSeasons(t *testing.T) {
 		{SeasonNumber: 4, Name: "Season 4", EpisodeCount: 4},
 	}
 	quota := &seer.Quota{TV: seer.QuotaUsage{Restricted: true, Remaining: 3}}
-	components := seasonPickerComponents("cache", "result", seasons, quota)
+	components := seasonPickerComponents("cache", "result", seasons, quota, seer.SeasonSelection{})
 
 	menu := components[0].(discordgo.ActionsRow).Components[0].(discordgo.SelectMenu)
 	if menu.MaxValues != 3 {
@@ -144,7 +130,7 @@ func TestSeasonPickerShowsAllSeasonsOnlyForUnlimitedQuota(t *testing.T) {
 	t.Parallel()
 	seasons := []seer.Season{{SeasonNumber: 1}, {SeasonNumber: 2}}
 	quota := &seer.Quota{TV: seer.QuotaUsage{Restricted: false}}
-	components := seasonPickerComponents("cache", "result", seasons, quota)
+	components := seasonPickerComponents("cache", "result", seasons, quota, seer.SeasonSelection{})
 
 	buttons := components[1].(discordgo.ActionsRow).Components
 	if len(buttons) != 2 {
@@ -153,6 +139,21 @@ func TestSeasonPickerShowsAllSeasonsOnlyForUnlimitedQuota(t *testing.T) {
 	allButton := buttons[0].(discordgo.Button)
 	if allButton.CustomID != componentAll+"cache:result" {
 		t.Fatalf("all-seasons custom ID = %q", allButton.CustomID)
+	}
+}
+
+func TestSeasonPickerKeepsSelectionAndShowsRequestAction(t *testing.T) {
+	t.Parallel()
+	seasons := []seer.Season{{SeasonNumber: 1}, {SeasonNumber: 2}}
+	quota := &seer.Quota{TV: seer.QuotaUsage{Restricted: true, Remaining: 2}}
+	components := seasonPickerComponents("cache", "result", seasons, quota, seer.SeasonSelection{Numbers: []int{2}})
+	menu := components[0].(discordgo.ActionsRow).Components[0].(discordgo.SelectMenu)
+	if menu.Options[0].Default || !menu.Options[1].Default {
+		t.Fatalf("season defaults = %#v", menu.Options)
+	}
+	button := components[1].(discordgo.ActionsRow).Components[0].(discordgo.Button)
+	if button.CustomID != componentConfirm+"cache:result" || button.Label != "Request selected seasons" {
+		t.Fatalf("request button = %#v", button)
 	}
 }
 
