@@ -65,6 +65,12 @@ jobs:
       - name: Run race detector
         run: go test -race ./...
 
+      - name: Run static analysis
+        run: go run honnef.co/go/tools/cmd/staticcheck@latest ./...
+
+      - name: Scan dependencies for vulnerabilities
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
       - name: Build binary
         run: CGO_ENABLED=0 go build -trimpath -o /tmp/augur ./cmd/augur
 

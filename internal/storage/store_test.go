@@ -2,10 +2,28 @@ package storage
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
 )
+
+func TestOpenRestrictsDatabasePermissions(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.db")
+	store, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("database permissions = %o, want 600", got)
+	}
+}
 
 func TestStorePersistsSubscriptionsAcrossRestart(t *testing.T) {
 	t.Parallel()
