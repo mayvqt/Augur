@@ -215,6 +215,10 @@ func (s *Store) initialize(ctx context.Context) error {
 	`); err != nil {
 		return fmt.Errorf("initialize schema: %w", err)
 	}
+	existingColumns, err := s.subscriptionColumns(ctx)
+	if err != nil {
+		return err
+	}
 	for _, column := range []struct {
 		name       string
 		definition string
@@ -225,11 +229,7 @@ func (s *Store) initialize(ctx context.Context) error {
 		{name: "language", definition: "TEXT NOT NULL DEFAULT ''"},
 		{name: "rating", definition: "REAL NOT NULL DEFAULT 0"},
 	} {
-		exists, err := s.subscriptionColumnExists(ctx, column.name)
-		if err != nil {
-			return err
-		}
-		if exists {
+		if _, exists := existingColumns[column.name]; exists {
 			continue
 		}
 		if _, err := s.db.ExecContext(ctx, "ALTER TABLE subscriptions ADD COLUMN "+column.name+" "+column.definition); err != nil {
@@ -239,25 +239,24 @@ func (s *Store) initialize(ctx context.Context) error {
 	return nil
 }
 
-func (s *Store) subscriptionColumnExists(ctx context.Context, name string) (bool, error) {
+func (s *Store) subscriptionColumns(ctx context.Context) (map[string]struct{}, error) {
 	rows, err := s.db.QueryContext(ctx, "PRAGMA table_info(subscriptions)")
 	if err != nil {
-		return false, fmt.Errorf("inspect subscription schema: %w", err)
+		return nil, fmt.Errorf("inspect subscription schema: %w", err)
 	}
 	defer rows.Close()
+	columns := make(map[string]struct{})
 	for rows.Next() {
 		var cid, notNull, primaryKey int
 		var columnName, columnType string
 		var defaultValue any
 		if err := rows.Scan(&cid, &columnName, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
-			return false, fmt.Errorf("inspect subscription column: %w", err)
+			return nil, fmt.Errorf("inspect subscription column: %w", err)
 		}
-		if columnName == name {
-			return true, nil
-		}
+		columns[columnName] = struct{}{}
 	}
 	if err := rows.Err(); err != nil {
-		return false, fmt.Errorf("inspect subscription schema: %w", err)
+		return nil, fmt.Errorf("inspect subscription schema: %w", err)
 	}
-	return false, nil
+	return columns, nil
 }
