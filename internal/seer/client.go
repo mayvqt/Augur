@@ -377,6 +377,7 @@ func (c *Client) doAsUser(ctx context.Context, method, path string, body any, ou
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		drainResponseBody(resp.Body)
 		// Response bodies are deliberately excluded from errors. Upstream errors can
 		// contain reflected request headers, credentials, or other sensitive data,
 		// and these errors are subsequently written to application logs.
@@ -398,6 +399,10 @@ func (c *Client) doAsUser(ctx context.Context, method, path string, body any, ou
 		return fmt.Errorf("decode seerr %s %s response: %w", method, endpoint, err)
 	}
 	return nil
+}
+
+func drainResponseBody(body io.Reader) {
+	_, _ = io.Copy(io.Discard, io.LimitReader(body, maxResponseBodyBytes+1))
 }
 
 func safeEndpointPath(path string) string {

@@ -359,6 +359,25 @@ func TestIsRetryable(t *testing.T) {
 	}
 }
 
+func TestDoDrainsErrorResponses(t *testing.T) {
+	t.Parallel()
+	body := &trackingReader{Reader: strings.NewReader("upstream error")}
+	client := newTestClient(t)
+	client.httpClient = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusBadGateway,
+			Body:       io.NopCloser(body),
+		}, nil
+	})}
+
+	if err := client.do(context.Background(), http.MethodGet, "/api/v1/request/1", nil, nil); err == nil {
+		t.Fatal("do accepted an error response")
+	}
+	if !body.reachedEOF {
+		t.Fatal("error response body was not drained")
+	}
+}
+
 func TestDoRejectsOversizedResponses(t *testing.T) {
 	t.Parallel()
 	client := newTestClient(t)
@@ -421,6 +440,19 @@ func TestClientDoesNotForwardAPIKeyThroughRedirect(t *testing.T) {
 }
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
+
+type trackingReader struct {
+	io.Reader
+	reachedEOF bool
+}
+
+func (r *trackingReader) Read(p []byte) (int, error) {
+	n, err := r.Reader.Read(p)
+	if err == io.EOF {
+		r.reachedEOF = true
+	}
+	return n, err
+}
 
 func newTestClient(t *testing.T) *Client {
 	t.Helper()
