@@ -14,6 +14,12 @@ import (
 	"github.com/bwmarrin/discordgo"
 )
 
+const (
+	expiredSearchMessage       = "That search expired. Run `/request` again."
+	expiredPickerMessage       = "That picker expired. Run `/request` again."
+	expiredSeasonPickerMessage = "That season picker expired. Run `/request` again."
+)
+
 func (b *Bot) handleCommand(s interactionSession, i *discordgo.InteractionCreate) {
 	switch i.ApplicationCommandData().Name {
 	case commandLink:
@@ -104,7 +110,7 @@ func (b *Bot) searchAndShow(ctx context.Context, s interactionSession, i *discor
 		return
 	}
 	if !b.cache.setResults(cacheID, ownerID, selections) {
-		b.edit(s, i, "That search expired. Run `/request` again.")
+		b.edit(s, i, expiredSearchMessage)
 		return
 	}
 	msg := "Select a result to preview."
@@ -150,14 +156,14 @@ func (b *Bot) handlePick(s interactionSession, i *discordgo.InteractionCreate, d
 	ownerID := interactionUserID(i)
 	result, ok := b.cache.get(cacheID, key, ownerID)
 	if !ok {
-		b.edit(s, i, "That picker expired. Run `/request` again.")
+		b.edit(s, i, expiredPickerMessage)
 		return
 	}
 	ctx, cancel := context.WithTimeout(b.ctx, 20*time.Second)
 	defer cancel()
 	quota, quotaKnown := b.cache.getQuota(cacheID, ownerID)
 	if !quotaKnown {
-		b.edit(s, i, "That picker expired. Run `/request` again.")
+		b.edit(s, i, expiredPickerMessage)
 		return
 	}
 	if result.MediaInfo != nil && seer.IsMediaAvailable(result.MediaInfo.Status) {
@@ -177,7 +183,7 @@ func (b *Bot) handlePick(s interactionSession, i *discordgo.InteractionCreate, d
 		return
 	}
 	if !b.cache.setAvailableSeasons(cacheID, key, ownerID, seasons) {
-		b.edit(s, i, "That picker expired. Run `/request` again.")
+		b.edit(s, i, expiredPickerMessage)
 		return
 	}
 	b.editPreview(
@@ -219,7 +225,7 @@ func (b *Bot) handleAllSeasons(s interactionSession, i *discordgo.InteractionCre
 	}
 	ownerID := interactionUserID(i)
 	if !b.cache.setSeasons(cacheID, key, ownerID, seer.SeasonSelection{All: true}) {
-		b.edit(s, i, "That season picker expired. Run `/request` again.")
+		b.edit(s, i, expiredSeasonPickerMessage)
 		return
 	}
 	b.submitRequest(s, i, cacheID, key)
@@ -235,12 +241,12 @@ func (b *Bot) showSeasonSelection(
 	ownerID := interactionUserID(i)
 	result, seasons, _, ok := b.cache.selection(cacheID, key, ownerID)
 	if !ok || result.MediaType != "tv" {
-		b.edit(s, i, "That season picker expired. Run `/request` again.")
+		b.edit(s, i, expiredSeasonPickerMessage)
 		return
 	}
 	quota, ok := b.cache.getQuota(cacheID, ownerID)
 	if !ok {
-		b.edit(s, i, "That season picker expired. Run `/request` again.")
+		b.edit(s, i, expiredSeasonPickerMessage)
 		return
 	}
 	if err := validatePickerSelection(selection, quota); err != nil {
@@ -248,7 +254,7 @@ func (b *Bot) showSeasonSelection(
 		return
 	}
 	if !b.cache.setSeasons(cacheID, key, ownerID, selection) {
-		b.edit(s, i, "That season picker expired. Run `/request` again.")
+		b.edit(s, i, expiredSeasonPickerMessage)
 		return
 	}
 	embed := b.mediaPreview(result, quota)
@@ -309,7 +315,7 @@ func (b *Bot) handleBack(s interactionSession, i *discordgo.InteractionCreate, d
 	ownerID := interactionUserID(i)
 	options := b.cache.options(cacheID, ownerID)
 	if len(options) == 0 {
-		b.edit(s, i, "That search expired. Run `/request` again.")
+		b.edit(s, i, expiredSearchMessage)
 		return
 	}
 	menuOptions := make([]discordgo.SelectMenuOption, 0, len(options))
@@ -341,7 +347,7 @@ func (b *Bot) handleSearchRetry(s interactionSession, i *discordgo.InteractionCr
 	ownerID := interactionUserID(i)
 	query, ok := b.cache.query(cacheID, ownerID)
 	if !ok {
-		b.edit(s, i, "That search expired. Run `/request` again.")
+		b.edit(s, i, expiredSearchMessage)
 		return
 	}
 	ctx, cancel := context.WithTimeout(b.ctx, 20*time.Second)
