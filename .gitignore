@@ -21,6 +21,7 @@ augur-state.*
 /dist/
 /build/
 /tmp/
+/.tmp/
 *.test
 *.out
 coverage.out

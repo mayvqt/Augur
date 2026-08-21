@@ -4,11 +4,15 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 )
 
 func TestOpenRestrictsDatabasePermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows does not expose Unix permission bits")
+	}
 	path := filepath.Join(t.TempDir(), "state.db")
 	store, err := Open(path)
 	if err != nil {
