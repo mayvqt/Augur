@@ -30,6 +30,8 @@ type Store struct {
 	db *sql.DB
 }
 
+const subscriptionColumnList = "request_id, discord_id, title, media_type, overview, poster_path, release_year, language, rating, created_at, completed_at"
+
 func Open(path string) (*Store, error) {
 	dbPath, err := storagePath(path)
 	if err != nil {
@@ -140,7 +142,7 @@ func (s *Store) PendingSubscriptions(ctx context.Context) ([]Subscription, error
 		return nil, err
 	}
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT request_id, discord_id, title, media_type, overview, poster_path, release_year, language, rating, created_at, completed_at
+		SELECT `+subscriptionColumnList+`
 		FROM subscriptions
 		WHERE completed_at IS NULL
 		ORDER BY created_at, request_id
@@ -174,7 +176,7 @@ func (s *Store) CompleteSubscription(ctx context.Context, requestID int, discord
 		UPDATE subscriptions
 		SET completed_at = ?
 		WHERE request_id = ? AND discord_id = ? AND completed_at IS NULL
-		RETURNING request_id, discord_id, title, media_type, overview, poster_path, release_year, language, rating, created_at, completed_at
+		RETURNING `+subscriptionColumnList+`
 	`, formatTime(completedAt), requestID, discordID)
 	subscription, ok, err := scanOptionalSubscription(row)
 	if err != nil {
