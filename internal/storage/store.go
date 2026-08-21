@@ -215,16 +215,49 @@ func (s *Store) initialize(ctx context.Context) error {
 	`); err != nil {
 		return fmt.Errorf("initialize schema: %w", err)
 	}
-	for _, column := range []string{
-		"overview TEXT NOT NULL DEFAULT ''",
-		"poster_path TEXT NOT NULL DEFAULT ''",
-		"release_year TEXT NOT NULL DEFAULT ''",
-		"language TEXT NOT NULL DEFAULT ''",
-		"rating REAL NOT NULL DEFAULT 0",
+	for _, column := range []struct {
+		name       string
+		definition string
+	}{
+		{name: "overview", definition: "TEXT NOT NULL DEFAULT ''"},
+		{name: "poster_path", definition: "TEXT NOT NULL DEFAULT ''"},
+		{name: "release_year", definition: "TEXT NOT NULL DEFAULT ''"},
+		{name: "language", definition: "TEXT NOT NULL DEFAULT ''"},
+		{name: "rating", definition: "REAL NOT NULL DEFAULT 0"},
 	} {
-		if _, err := s.db.ExecContext(ctx, "ALTER TABLE subscriptions ADD COLUMN "+column); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		exists, err := s.subscriptionColumnExists(ctx, column.name)
+		if err != nil {
+			return err
+		}
+		if exists {
+			continue
+		}
+		if _, err := s.db.ExecContext(ctx, "ALTER TABLE subscriptions ADD COLUMN "+column.name+" "+column.definition); err != nil {
 			return fmt.Errorf("add subscription metadata column: %w", err)
 		}
 	}
 	return nil
+}
+
+func (s *Store) subscriptionColumnExists(ctx context.Context, name string) (bool, error) {
+	rows, err := s.db.QueryContext(ctx, "PRAGMA table_info(subscriptions)")
+	if err != nil {
+		return false, fmt.Errorf("inspect subscription schema: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid, notNull, primaryKey int
+		var columnName, columnType string
+		var defaultValue any
+		if err := rows.Scan(&cid, &columnName, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+			return false, fmt.Errorf("inspect subscription column: %w", err)
+		}
+		if columnName == name {
+			return true, nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return false, fmt.Errorf("inspect subscription schema: %w", err)
+	}
+	return false, nil
 }
