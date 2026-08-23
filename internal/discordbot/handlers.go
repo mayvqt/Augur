@@ -464,7 +464,7 @@ func canManageServer(i *discordgo.InteractionCreate) bool {
 		return false
 	}
 	permissions := i.Member.Permissions
-	return permissions&discordgo.PermissionAdministrator != 0 || permissions&discordgo.PermissionManageServer != 0
+	return permissions&discordgo.PermissionAdministrator != 0 || permissions&discordgo.PermissionManageGuild != 0
 }
 
 func (b *Bot) handleBack(s interactionSession, i *discordgo.InteractionCreate, data discordgo.MessageComponentInteractionData) {
