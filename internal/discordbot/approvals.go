@@ -261,7 +261,7 @@ func (b *Bot) sendDecisionDM(discordID string, requestID int, embed *discordgo.M
 }
 
 func decisionEmbed(source *discordgo.MessageEmbed, status string) *discordgo.MessageEmbed {
-	embed := &discordgo.MessageEmbed{Title: "Your Seerr request was " + strings.ToLower(status), Color: 0x57F287}
+	embed := &discordgo.MessageEmbed{Title: "Your request was " + strings.ToLower(status), Color: 0x57F287}
 	if status == "Declined" {
 		embed.Color = 0xED4245
 	}

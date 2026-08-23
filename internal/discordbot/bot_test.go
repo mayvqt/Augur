@@ -209,7 +209,7 @@ func TestDecisionEmbedIsHumanReadable(t *testing.T) {
 	t.Parallel()
 	source := &discordgo.MessageEmbed{Title: "Arrival (2016)", URL: "https://seerr.test/movie/329865", Thumbnail: &discordgo.MessageEmbedThumbnail{URL: "https://image.test/poster.jpg"}}
 	embed := decisionEmbed(source, "Approved")
-	if embed.Title != "Your Seerr request was approved" || embed.Description != "Arrival (2016)" || embed.Color != 0x57F287 {
+	if embed.Title != "Your request was approved" || embed.Description != "Arrival (2016)" || embed.Color != 0x57F287 {
 		t.Fatalf("approved embed = %#v", embed)
 	}
 	declined := decisionEmbed(source, "Declined")
