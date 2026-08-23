@@ -24,6 +24,3 @@ See [`config.example.json`](../config.example.json) for the complete format.
 the same secret. Keep secrets out of version control; prefer files in containers.
 
 The optional server provides `/healthz`, `/readyz`, and `/metrics`. It has no authentication; keep it private.
-
-The worker interval also controls pending-request reconciliation for Discord approval channels. Reconciliation runs
-once immediately when Augur starts.
