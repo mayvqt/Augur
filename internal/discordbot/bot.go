@@ -7,6 +7,7 @@ import (
 
 	"github.com/mayvqt/Augur/internal/config"
 	"github.com/mayvqt/Augur/internal/seer"
+	"github.com/mayvqt/Augur/internal/storage"
 
 	"github.com/bwmarrin/discordgo"
 )
@@ -18,6 +19,7 @@ type Handler interface {
 	Request(ctx context.Context, discordID string, result seer.SearchResult, seasons seer.SeasonSelection) (seer.Request, error)
 	ConfigureApprovals(ctx context.Context, guildID, channelID string, enabled bool) error
 	ApprovalChannel(ctx context.Context, guildID string) (string, bool, error)
+	ApprovalDestinations(ctx context.Context) ([]storage.ApprovalSettings, error)
 	ClaimApproval(ctx context.Context, requestID int, guildID, channelID string) (bool, error)
 	FinishApproval(ctx context.Context, requestID int, guildID, channelID, messageID string) error
 	ReleaseApproval(ctx context.Context, requestID int, guildID string) error

@@ -20,6 +20,10 @@ func (r *Runner) ApprovalChannel(ctx context.Context, guildID string) (string, b
 	return settings.ChannelID, true, nil
 }
 
+func (r *Runner) ApprovalDestinations(ctx context.Context) ([]storage.ApprovalSettings, error) {
+	return r.store.EnabledApprovalSettings(ctx)
+}
+
 func (r *Runner) ClaimApproval(ctx context.Context, requestID int, guildID, channelID string) (bool, error) {
 	return r.store.ClaimApprovalMessage(ctx, storage.ApprovalMessage{RequestID: requestID, GuildID: guildID, ChannelID: channelID})
 }

@@ -286,6 +286,32 @@ func TestUpdateRequestStatusUsesApprovalEndpoint(t *testing.T) {
 	}
 }
 
+func TestPendingRequestsPaginatesAllResults(t *testing.T) {
+	client := newTestClient(t)
+	calls := 0
+	client.httpClient = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		calls++
+		if r.URL.Query().Get("filter") != "pending" || r.URL.Query().Get("take") != "100" {
+			t.Fatalf("query = %s", r.URL.RawQuery)
+		}
+		count := 100
+		start := 0
+		if r.URL.Query().Get("skip") == "100" {
+			count = 1
+			start = 100
+		}
+		results := make([]Request, count)
+		for index := range results {
+			results[index] = Request{ID: start + index + 1, Status: 1}
+		}
+		return jsonResponse(t, map[string]any{"pageInfo": map[string]any{"results": 101}, "results": results}), nil
+	})}
+	requests, err := client.PendingRequests(context.Background())
+	if err != nil || len(requests) != 101 || calls != 2 {
+		t.Fatalf("PendingRequests() returned %d requests in %d calls: %v", len(requests), calls, err)
+	}
+}
+
 func TestClientMethodsValidateIdentifiersBeforeHTTP(t *testing.T) {
 	t.Parallel()
 	client := newTestClient(t)

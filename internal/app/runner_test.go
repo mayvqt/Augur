@@ -278,6 +278,31 @@ func TestRunnerKeepsSubscriptionPendingWhenNotificationFails(t *testing.T) {
 	}
 }
 
+func TestReconcileApprovalsIncludesWebsiteRequests(t *testing.T) {
+	t.Parallel()
+	seerClient := &fakeSeer{
+		pendingRequests: []seer.Request{{
+			ID: 91, Status: 1, Type: "movie",
+			Media:       &seer.Media{TMDBID: 329865, MediaType: "movie"},
+			RequestedBy: &seer.User{ID: 8, Username: "Rochelle"},
+		}},
+		mediaDetails: seer.SearchResult{ID: 329865, Title: "Arrival", Overview: "First contact."},
+	}
+	store := &fakeStore{approval: storage.ApprovalSettings{GuildID: "123", ChannelID: "456", Enabled: true}}
+	notifier := &fakeNotifier{}
+	runner := newTestRunner(testConfig(), seerClient, store, notifier)
+
+	runner.reconcileApprovals(context.Background())
+
+	if len(notifier.approvals) != 1 {
+		t.Fatalf("approvals = %#v, want one", notifier.approvals)
+	}
+	approval := notifier.approvals[0]
+	if approval.RequestID != 91 || approval.Requester != "Rochelle" || approval.Media.MediaType != "movie" {
+		t.Fatalf("approval = %#v", approval)
+	}
+}
+
 func TestHealthHandlers(t *testing.T) {
 	t.Parallel()
 	store := &fakeStore{}

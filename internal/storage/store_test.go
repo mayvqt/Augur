@@ -172,6 +172,10 @@ func TestApprovalSettingsAndMessageDedupe(t *testing.T) {
 		t.Fatalf("ApprovalSettings() = %#v, %t, %v", got, ok, err)
 	}
 	message := ApprovalMessage{RequestID: 42, GuildID: "123", ChannelID: "456"}
+	needed, err := store.NeedsApprovalMessage(ctx, 42)
+	if err != nil || !needed {
+		t.Fatalf("NeedsApprovalMessage before claim = %t, %v", needed, err)
+	}
 	claimed, err := store.ClaimApprovalMessage(ctx, message)
 	if err != nil || !claimed {
 		t.Fatalf("first claim = %t, %v", claimed, err)
@@ -183,6 +187,10 @@ func TestApprovalSettingsAndMessageDedupe(t *testing.T) {
 	message.MessageID = "789"
 	if err := store.FinishApprovalMessage(ctx, message); err != nil {
 		t.Fatal(err)
+	}
+	needed, err = store.NeedsApprovalMessage(ctx, 42)
+	if err != nil || needed {
+		t.Fatalf("NeedsApprovalMessage after claim = %t, %v", needed, err)
 	}
 }
 

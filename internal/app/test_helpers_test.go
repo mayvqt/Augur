@@ -48,6 +48,7 @@ type fakeSeer struct {
 	mediaDetailsCalls int
 	createdRequest    seer.Request
 	requestByID       map[int]seer.Request
+	pendingRequests   []seer.Request
 	requestFailures   int
 	requestErr        error
 	requestHook       func()
@@ -121,6 +122,13 @@ func (f *fakeSeer) Request(ctx context.Context, id int) (seer.Request, error) {
 	return f.requestByID[id], nil
 }
 
+func (f *fakeSeer) PendingRequests(ctx context.Context) ([]seer.Request, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return append([]seer.Request(nil), f.pendingRequests...), nil
+}
+
 func (f *fakeSeer) UpdateRequestStatus(ctx context.Context, id int, action string) (seer.Request, error) {
 	if err := ctx.Err(); err != nil {
 		return seer.Request{}, err
@@ -192,6 +200,20 @@ func (f *fakeStore) ApprovalSettings(ctx context.Context, guildID string) (stora
 	return f.approval, f.approval.GuildID == guildID, ctx.Err()
 }
 
+func (f *fakeStore) EnabledApprovalSettings(ctx context.Context) ([]storage.ApprovalSettings, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if f.approval.Enabled {
+		return []storage.ApprovalSettings{f.approval}, nil
+	}
+	return nil, nil
+}
+
+func (f *fakeStore) NeedsApprovalMessage(ctx context.Context, requestID int) (bool, error) {
+	return f.approval.Enabled, ctx.Err()
+}
+
 func (f *fakeStore) ClaimApprovalMessage(ctx context.Context, message storage.ApprovalMessage) (bool, error) {
 	return true, ctx.Err()
 }
@@ -215,7 +237,16 @@ type notification struct {
 
 type fakeNotifier struct {
 	notifications []notification
+	approvals     []seer.ApprovalRequest
 	notifyErr     error
+}
+
+func (f *fakeNotifier) ReconcileApprovals(ctx context.Context, approvals []seer.ApprovalRequest) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	f.approvals = append(f.approvals, approvals...)
+	return nil
 }
 
 func (f *fakeNotifier) Start(ctx context.Context) error {

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/mayvqt/Augur/internal/seer"
+	"github.com/mayvqt/Augur/internal/storage"
 
 	"github.com/bwmarrin/discordgo"
 )
@@ -367,28 +368,65 @@ func (b *Bot) postApproval(ctx context.Context, guildID string, requestID int, r
 		}
 		return
 	}
-	embed := b.mediaPreview(result, nil)
+	b.sendApproval(ctx, storage.ApprovalSettings{GuildID: guildID, ChannelID: channelID, Enabled: true}, seer.ApprovalRequest{
+		RequestID: requestID, RequesterID: requesterID, Media: result, Seasons: seasons,
+	}, true)
+}
+
+func (b *Bot) ReconcileApprovals(ctx context.Context, approvals []seer.ApprovalRequest) error {
+	destinations, err := b.handler.ApprovalDestinations(ctx)
+	if err != nil {
+		return err
+	}
+	for _, approval := range approvals {
+		for _, destination := range destinations {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			b.sendApproval(ctx, destination, approval, false)
+		}
+	}
+	return nil
+}
+
+func (b *Bot) sendApproval(ctx context.Context, destination storage.ApprovalSettings, approval seer.ApprovalRequest, alreadyClaimed bool) {
+	if !alreadyClaimed {
+		claimed, err := b.handler.ClaimApproval(ctx, approval.RequestID, destination.GuildID, destination.ChannelID)
+		if err != nil || !claimed {
+			if err != nil {
+				b.logger.Error("claim approval message", "request_id", approval.RequestID, "error", err)
+			}
+			return
+		}
+	}
+	embed := b.mediaPreview(approval.Media, nil)
 	embed.Color = 0xFEE75C
+	requester := normalizeInlineText(approval.Requester)
+	if approval.RequesterID != "" {
+		requester = "<@" + approval.RequesterID + ">"
+	} else if requester == "" {
+		requester = "Unknown Seerr user"
+	}
 	embed.Fields = []*discordgo.MessageEmbedField{
-		{Name: "Requested by", Value: "<@" + requesterID + ">", Inline: true},
+		{Name: "Requested by", Value: requester, Inline: true},
 		{Name: "Status", Value: "Pending approval", Inline: true},
 	}
-	if result.MediaType == "tv" {
-		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Seasons", Value: seasonSelectionLabel(seasons), Inline: true})
+	if approval.Media.MediaType == "tv" && (approval.Seasons.All || len(approval.Seasons.Numbers) > 0) {
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Seasons", Value: seasonSelectionLabel(approval.Seasons), Inline: true})
 	}
-	embed.Footer = &discordgo.MessageEmbedFooter{Text: fmt.Sprintf("Seerr request #%d", requestID)}
-	message, err := b.session.ChannelMessageSendComplex(channelID, &discordgo.MessageSend{
+	embed.Footer = &discordgo.MessageEmbedFooter{Text: fmt.Sprintf("Seerr request #%d", approval.RequestID)}
+	message, err := b.session.ChannelMessageSendComplex(destination.ChannelID, &discordgo.MessageSend{
 		Embeds:          []*discordgo.MessageEmbed{embed},
-		Components:      approvalComponents(requestID),
+		Components:      approvalComponents(approval.RequestID),
 		AllowedMentions: noMentions(),
 	})
 	if err != nil {
-		_ = b.handler.ReleaseApproval(ctx, requestID, guildID)
-		b.logger.Error("send approval message", "request_id", requestID, "channel_id", channelID, "error", err)
+		_ = b.handler.ReleaseApproval(ctx, approval.RequestID, destination.GuildID)
+		b.logger.Error("send approval message", "request_id", approval.RequestID, "channel_id", destination.ChannelID, "error", err)
 		return
 	}
-	if err := b.handler.FinishApproval(ctx, requestID, guildID, channelID, message.ID); err != nil {
-		b.logger.Error("save approval message", "request_id", requestID, "error", err)
+	if err := b.handler.FinishApproval(ctx, approval.RequestID, destination.GuildID, destination.ChannelID, message.ID); err != nil {
+		b.logger.Error("save approval message", "request_id", approval.RequestID, "error", err)
 	}
 }
 

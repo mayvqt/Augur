@@ -69,7 +69,8 @@ type SearchResult struct {
 }
 
 type User struct {
-	ID int `json:"id"`
+	ID       int    `json:"id"`
+	Username string `json:"username"`
 }
 
 type Quota struct {
@@ -101,15 +102,31 @@ type SeasonSelection struct {
 }
 
 type Request struct {
-	ID        int    `json:"id"`
-	Status    any    `json:"status"`
-	Media     *Media `json:"media"`
-	MediaInfo *Media `json:"mediaInfo"`
+	ID          int             `json:"id"`
+	Status      any             `json:"status"`
+	Type        string          `json:"type"`
+	Media       *Media          `json:"media"`
+	MediaInfo   *Media          `json:"mediaInfo"`
+	RequestedBy *User           `json:"requestedBy"`
+	Seasons     []RequestSeason `json:"seasons"`
 }
 
 type Media struct {
-	TMDBID int `json:"tmdbId"`
-	Status any `json:"status"`
+	TMDBID    int    `json:"tmdbId"`
+	MediaType string `json:"mediaType"`
+	Status    any    `json:"status"`
+}
+
+type RequestSeason struct {
+	SeasonNumber int `json:"seasonNumber"`
+}
+
+type ApprovalRequest struct {
+	RequestID   int
+	RequesterID string
+	Requester   string
+	Media       SearchResult
+	Seasons     SeasonSelection
 }
 
 type NotificationSettings struct {
@@ -338,6 +355,35 @@ func (c *Client) Request(ctx context.Context, id int) (Request, error) {
 		return Request{}, fmt.Errorf("seerr request response ID is %d, expected %d", out.ID, id)
 	}
 	return out, nil
+}
+
+func (c *Client) PendingRequests(ctx context.Context) ([]Request, error) {
+	const pageSize = 100
+	var requests []Request
+	for skip := 0; ; skip += pageSize {
+		values := url.Values{}
+		values.Set("filter", "pending")
+		values.Set("sort", "added")
+		values.Set("sortDirection", "asc")
+		values.Set("take", strconv.Itoa(pageSize))
+		values.Set("skip", strconv.Itoa(skip))
+		var page struct {
+			PageInfo struct {
+				Results int `json:"results"`
+			} `json:"pageInfo"`
+			Results []Request `json:"results"`
+		}
+		if err := c.do(ctx, http.MethodGet, "/api/v1/request?"+values.Encode(), nil, &page); err != nil {
+			return nil, err
+		}
+		requests = append(requests, page.Results...)
+		if len(page.Results) < pageSize || len(requests) >= page.PageInfo.Results {
+			return requests, nil
+		}
+		if skip > math.MaxInt-pageSize {
+			return nil, errors.New("Seerr pending request pagination overflowed")
+		}
+	}
 }
 
 func (c *Client) UpdateRequestStatus(ctx context.Context, id int, action string) (Request, error) {

@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"sort"
 	"time"
 
 	"github.com/mayvqt/Augur/internal/seer"
@@ -14,11 +15,67 @@ func (r *Runner) runMonitor(ctx context.Context) {
 	defer ticker.Stop()
 	for {
 		r.checkSubscriptions(ctx)
+		r.reconcileApprovals(ctx)
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
 		}
+	}
+}
+
+func (r *Runner) reconcileApprovals(ctx context.Context) {
+	requests, err := r.seer.PendingRequests(ctx)
+	if err != nil {
+		if ctx.Err() == nil {
+			r.logger.Error("list pending Seerr requests", "error", err)
+		}
+		return
+	}
+	approvals := make([]seer.ApprovalRequest, 0, len(requests))
+	for _, request := range requests {
+		if ctx.Err() != nil {
+			return
+		}
+		needed, err := r.store.NeedsApprovalMessage(ctx, request.ID)
+		if err != nil {
+			r.logger.Error("check pending request approval coverage", "request_id", request.ID, "error", err)
+			continue
+		}
+		if !needed {
+			continue
+		}
+		mediaType := request.Type
+		if mediaType == "" && request.Media != nil {
+			mediaType = request.Media.MediaType
+		}
+		if request.ID <= 0 || request.Media == nil || request.Media.TMDBID <= 0 || (mediaType != "movie" && mediaType != "tv") {
+			r.logger.Warn("skip malformed pending Seerr request", "request_id", request.ID)
+			continue
+		}
+		media, err := r.seer.MediaDetails(ctx, mediaType, request.Media.TMDBID)
+		if err != nil {
+			r.logger.Error("load pending request media", "request_id", request.ID, "error", err)
+			continue
+		}
+		media.MediaType = mediaType
+		selection := seer.SeasonSelection{}
+		if mediaType == "tv" {
+			for _, season := range request.Seasons {
+				if season.SeasonNumber >= 0 {
+					selection.Numbers = append(selection.Numbers, season.SeasonNumber)
+				}
+			}
+			sort.Ints(selection.Numbers)
+		}
+		approval := seer.ApprovalRequest{RequestID: request.ID, Media: media, Seasons: selection}
+		if request.RequestedBy != nil {
+			approval.Requester = request.RequestedBy.Username
+		}
+		approvals = append(approvals, approval)
+	}
+	if err := r.bot.ReconcileApprovals(ctx, approvals); err != nil && ctx.Err() == nil {
+		r.logger.Error("reconcile Discord approval messages", "error", err)
 	}
 }
 

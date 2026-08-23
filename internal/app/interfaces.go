@@ -16,6 +16,7 @@ type seerClient interface {
 	MediaDetails(ctx context.Context, mediaType string, mediaID int) (seer.SearchResult, error)
 	RequestMedia(ctx context.Context, userID int, mediaType string, mediaID int, seasons seer.SeasonSelection) (seer.Request, error)
 	Request(ctx context.Context, id int) (seer.Request, error)
+	PendingRequests(ctx context.Context) ([]seer.Request, error)
 	UpdateRequestStatus(ctx context.Context, id int, action string) (seer.Request, error)
 }
 
@@ -25,6 +26,8 @@ type subscriptionStore interface {
 	CompleteSubscription(ctx context.Context, requestID int, discordID string, completedAt time.Time) (storage.Subscription, bool, error)
 	SetApprovalSettings(ctx context.Context, settings storage.ApprovalSettings) error
 	ApprovalSettings(ctx context.Context, guildID string) (storage.ApprovalSettings, bool, error)
+	EnabledApprovalSettings(ctx context.Context) ([]storage.ApprovalSettings, error)
+	NeedsApprovalMessage(ctx context.Context, requestID int) (bool, error)
 	ClaimApprovalMessage(ctx context.Context, message storage.ApprovalMessage) (bool, error)
 	FinishApprovalMessage(ctx context.Context, message storage.ApprovalMessage) error
 	ReleaseApprovalMessage(ctx context.Context, requestID int, guildID string) error
@@ -35,5 +38,6 @@ type subscriptionStore interface {
 type notifier interface {
 	Start(ctx context.Context) error
 	NotifyComplete(ctx context.Context, discordID string, media seer.SearchResult) error
+	ReconcileApprovals(ctx context.Context, approvals []seer.ApprovalRequest) error
 	Close() error
 }

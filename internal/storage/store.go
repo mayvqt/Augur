@@ -231,6 +231,44 @@ func (s *Store) ApprovalSettings(ctx context.Context, guildID string) (ApprovalS
 	return settings, true, nil
 }
 
+func (s *Store) EnabledApprovalSettings(ctx context.Context) ([]ApprovalSettings, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT guild_id, channel_id, enabled FROM approval_settings WHERE enabled = 1 ORDER BY guild_id`)
+	if err != nil {
+		return nil, fmt.Errorf("list enabled approval settings: %w", err)
+	}
+	defer rows.Close()
+	var settings []ApprovalSettings
+	for rows.Next() {
+		var item ApprovalSettings
+		var enabled int
+		if err := rows.Scan(&item.GuildID, &item.ChannelID, &enabled); err != nil {
+			return nil, fmt.Errorf("scan approval settings: %w", err)
+		}
+		item.Enabled = enabled != 0
+		settings = append(settings, item)
+	}
+	return settings, rows.Err()
+}
+
+func (s *Store) NeedsApprovalMessage(ctx context.Context, requestID int) (bool, error) {
+	if requestID <= 0 {
+		return false, errors.New("request_id must be positive")
+	}
+	var needed int
+	err := s.db.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM approval_settings settings
+			LEFT JOIN approval_messages messages
+				ON messages.guild_id = settings.guild_id AND messages.request_id = ?
+			WHERE settings.enabled = 1 AND messages.request_id IS NULL
+		)
+	`, requestID).Scan(&needed)
+	if err != nil {
+		return false, fmt.Errorf("check approval message coverage: %w", err)
+	}
+	return needed != 0, nil
+}
+
 func (s *Store) ClaimApprovalMessage(ctx context.Context, message ApprovalMessage) (bool, error) {
 	result, err := s.db.ExecContext(ctx, `
 		INSERT INTO approval_messages (request_id, guild_id, channel_id, message_id)
