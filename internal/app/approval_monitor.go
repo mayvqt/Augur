@@ -3,7 +3,9 @@ package app
 import (
 	"context"
 	"sort"
+	"strings"
 
+	"github.com/mayvqt/Augur/internal/config"
 	"github.com/mayvqt/Augur/internal/seer"
 )
 
@@ -55,7 +57,19 @@ func (r *Runner) pendingApproval(ctx context.Context, request seer.Request) (see
 	media.MediaType = mediaType
 	approval := seer.ApprovalRequest{RequestID: request.ID, Media: media}
 	if request.RequestedBy != nil {
-		approval.Requester = request.RequestedBy.Username
+		approval.Requester = request.RequestedBy.DisplayLabel()
+		settings, err := r.seer.NotificationSettings(ctx, request.RequestedBy.ID)
+		if err != nil {
+			r.logger.Warn("load pending requester Discord IDs", "request_id", request.ID, "error", err)
+		} else {
+			for _, discordID := range settings.DiscordIDs {
+				discordID = strings.TrimSpace(discordID)
+				if config.IsDiscordID(discordID) {
+					approval.RequesterID = discordID
+					break
+				}
+			}
+		}
 	}
 	if mediaType == "tv" {
 		seen := make(map[int]struct{}, len(request.Seasons))

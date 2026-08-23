@@ -69,8 +69,11 @@ type SearchResult struct {
 }
 
 type User struct {
-	ID       int    `json:"id"`
-	Username string `json:"username"`
+	ID               int    `json:"id"`
+	DisplayName      string `json:"displayName"`
+	Username         string `json:"username"`
+	PlexUsername     string `json:"plexUsername"`
+	JellyfinUsername string `json:"jellyfinUsername"`
 }
 
 type Quota struct {

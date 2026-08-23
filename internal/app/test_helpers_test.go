@@ -38,24 +38,25 @@ func testConfig() config.Config {
 }
 
 type fakeSeer struct {
-	searchResults     []seer.SearchResult
-	user              seer.User
-	found             bool
-	quota             seer.Quota
-	tvDetails         seer.TVDetails
-	mediaDetails      seer.SearchResult
-	mediaDetailsErr   error
-	mediaDetailsCalls int
-	createdRequest    seer.Request
-	requestByID       map[int]seer.Request
-	pendingRequests   []seer.Request
-	requestFailures   int
-	requestErr        error
-	requestHook       func()
-	requestCalls      int
-	requestedSeasons  seer.SeasonSelection
-	searchCalls       int
-	searchQuery       string
+	searchResults        []seer.SearchResult
+	user                 seer.User
+	found                bool
+	quota                seer.Quota
+	tvDetails            seer.TVDetails
+	mediaDetails         seer.SearchResult
+	mediaDetailsErr      error
+	mediaDetailsCalls    int
+	createdRequest       seer.Request
+	requestByID          map[int]seer.Request
+	pendingRequests      []seer.Request
+	notificationSettings seer.NotificationSettings
+	requestFailures      int
+	requestErr           error
+	requestHook          func()
+	requestCalls         int
+	requestedSeasons     seer.SeasonSelection
+	searchCalls          int
+	searchQuery          string
 }
 
 func (f *fakeSeer) Search(ctx context.Context, query string) ([]seer.SearchResult, error) {
@@ -130,7 +131,7 @@ func (f *fakeSeer) PendingRequests(ctx context.Context) ([]seer.Request, error) 
 }
 
 func (f *fakeSeer) NotificationSettings(ctx context.Context, userID int) (seer.NotificationSettings, error) {
-	return seer.NotificationSettings{}, ctx.Err()
+	return f.notificationSettings, ctx.Err()
 }
 
 func (f *fakeSeer) UpdateRequestStatus(ctx context.Context, id int, action string) (seer.Request, error) {

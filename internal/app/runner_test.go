@@ -286,7 +286,8 @@ func TestReconcileApprovalsIncludesWebsiteRequests(t *testing.T) {
 			Media:       &seer.Media{TMDBID: 329865, MediaType: "movie"},
 			RequestedBy: &seer.User{ID: 8, Username: "Rochelle"},
 		}},
-		mediaDetails: seer.SearchResult{ID: 329865, Title: "Arrival", Overview: "First contact."},
+		mediaDetails:         seer.SearchResult{ID: 329865, Title: "Arrival", Overview: "First contact."},
+		notificationSettings: seer.NotificationSettings{DiscordIDs: []string{"123456789012345678"}},
 	}
 	store := &fakeStore{approval: storage.ApprovalSettings{GuildID: "123", ChannelID: "456", Enabled: true}}
 	notifier := &fakeNotifier{}
@@ -298,7 +299,7 @@ func TestReconcileApprovalsIncludesWebsiteRequests(t *testing.T) {
 		t.Fatalf("approvals = %#v, want one", notifier.approvals)
 	}
 	approval := notifier.approvals[0]
-	if approval.RequestID != 91 || approval.Requester != "Rochelle" || approval.Media.MediaType != "movie" {
+	if approval.RequestID != 91 || approval.Requester != "Rochelle" || approval.RequesterID != "123456789012345678" || approval.Media.MediaType != "movie" {
 		t.Fatalf("approval = %#v", approval)
 	}
 }
