@@ -12,6 +12,8 @@ cp .env.example .env
 docker compose up -d
 ```
 
-Use `/link` to connect a Discord account and `/request` to request media. State is stored in `./data`.
+Use `/link` to connect a Discord account and `/request` to request media. A server administrator can run
+`/setup enabled:true channel:#approvals` to post pending requests with Approve and Decline buttons, or
+`/setup enabled:false` to turn those messages off. State is stored in `./data`.
 
 [Configuration](docs/configuration.md) · [Unraid](docs/unraid.md) · [Development](docs/development.md)

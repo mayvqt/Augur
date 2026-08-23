@@ -30,6 +30,19 @@ type Store struct {
 	db *sql.DB
 }
 
+type ApprovalSettings struct {
+	GuildID   string
+	ChannelID string
+	Enabled   bool
+}
+
+type ApprovalMessage struct {
+	RequestID int
+	GuildID   string
+	ChannelID string
+	MessageID string
+}
+
 const subscriptionColumnList = "request_id, discord_id, title, media_type, overview, poster_path, release_year, language, rating, created_at, completed_at"
 
 func Open(path string) (*Store, error) {
@@ -185,6 +198,68 @@ func (s *Store) CompleteSubscription(ctx context.Context, requestID int, discord
 	return subscription, ok, nil
 }
 
+func (s *Store) SetApprovalSettings(ctx context.Context, settings ApprovalSettings) error {
+	settings.GuildID = strings.TrimSpace(settings.GuildID)
+	settings.ChannelID = strings.TrimSpace(settings.ChannelID)
+	if settings.GuildID == "" {
+		return errors.New("guild_id is required")
+	}
+	if settings.Enabled && settings.ChannelID == "" {
+		return errors.New("channel_id is required when approvals are enabled")
+	}
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO approval_settings (guild_id, channel_id, enabled) VALUES (?, ?, ?)
+		ON CONFLICT(guild_id) DO UPDATE SET channel_id = excluded.channel_id, enabled = excluded.enabled
+	`, settings.GuildID, settings.ChannelID, settings.Enabled)
+	if err != nil {
+		return fmt.Errorf("save approval settings: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) ApprovalSettings(ctx context.Context, guildID string) (ApprovalSettings, bool, error) {
+	var settings ApprovalSettings
+	var enabled int
+	err := s.db.QueryRowContext(ctx, `SELECT guild_id, channel_id, enabled FROM approval_settings WHERE guild_id = ?`, strings.TrimSpace(guildID)).Scan(&settings.GuildID, &settings.ChannelID, &enabled)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ApprovalSettings{}, false, nil
+	}
+	if err != nil {
+		return ApprovalSettings{}, false, fmt.Errorf("load approval settings: %w", err)
+	}
+	settings.Enabled = enabled != 0
+	return settings, true, nil
+}
+
+func (s *Store) ClaimApprovalMessage(ctx context.Context, message ApprovalMessage) (bool, error) {
+	result, err := s.db.ExecContext(ctx, `
+		INSERT INTO approval_messages (request_id, guild_id, channel_id, message_id)
+		VALUES (?, ?, ?, '') ON CONFLICT(request_id, guild_id) DO NOTHING
+	`, message.RequestID, strings.TrimSpace(message.GuildID), strings.TrimSpace(message.ChannelID))
+	if err != nil {
+		return false, fmt.Errorf("claim approval message: %w", err)
+	}
+	n, err := result.RowsAffected()
+	return n == 1, err
+}
+
+func (s *Store) FinishApprovalMessage(ctx context.Context, message ApprovalMessage) error {
+	result, err := s.db.ExecContext(ctx, `UPDATE approval_messages SET message_id = ? WHERE request_id = ? AND guild_id = ? AND message_id = ''`, message.MessageID, message.RequestID, message.GuildID)
+	if err != nil {
+		return fmt.Errorf("finish approval message: %w", err)
+	}
+	n, err := result.RowsAffected()
+	if err != nil || n != 1 {
+		return errors.New("approval message claim was not found")
+	}
+	return nil
+}
+
+func (s *Store) ReleaseApprovalMessage(ctx context.Context, requestID int, guildID string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM approval_messages WHERE request_id = ? AND guild_id = ? AND message_id = ''`, requestID, guildID)
+	return err
+}
+
 func (s *Store) initialize(ctx context.Context) error {
 	pragmas := []string{
 		"PRAGMA busy_timeout = 5000",
@@ -214,6 +289,18 @@ func (s *Store) initialize(ctx context.Context) error {
 		);
 		CREATE INDEX IF NOT EXISTS idx_subscriptions_open_created
 			ON subscriptions(completed_at, created_at, request_id);
+		CREATE TABLE IF NOT EXISTS approval_settings (
+			guild_id TEXT PRIMARY KEY,
+			channel_id TEXT NOT NULL DEFAULT '',
+			enabled INTEGER NOT NULL CHECK (enabled IN (0, 1))
+		);
+		CREATE TABLE IF NOT EXISTS approval_messages (
+			request_id INTEGER NOT NULL CHECK (request_id > 0),
+			guild_id TEXT NOT NULL,
+			channel_id TEXT NOT NULL,
+			message_id TEXT NOT NULL DEFAULT '',
+			PRIMARY KEY (request_id, guild_id)
+		);
 	`); err != nil {
 		return fmt.Errorf("initialize schema: %w", err)
 	}

@@ -16,6 +16,12 @@ type Handler interface {
 	Quota(ctx context.Context, discordID string) (*seer.Quota, error)
 	TVSeasons(ctx context.Context, mediaID int) ([]seer.Season, error)
 	Request(ctx context.Context, discordID string, result seer.SearchResult, seasons seer.SeasonSelection) (seer.Request, error)
+	ConfigureApprovals(ctx context.Context, guildID, channelID string, enabled bool) error
+	ApprovalChannel(ctx context.Context, guildID string) (string, bool, error)
+	ClaimApproval(ctx context.Context, requestID int, guildID, channelID string) (bool, error)
+	FinishApproval(ctx context.Context, requestID int, guildID, channelID, messageID string) error
+	ReleaseApproval(ctx context.Context, requestID int, guildID string) error
+	DecideRequest(ctx context.Context, requestID int, action string) (seer.Request, error)
 }
 
 type interactionSession interface {

@@ -15,22 +15,23 @@ import (
 )
 
 type Runner struct {
-	cfg       config.Config
-	seer      seerClient
-	store     subscriptionStore
-	bot       notifier
-	health    *healthServer
-	metrics   *Metrics
-	logger    *slog.Logger
-	mu        sync.Mutex
-	cancel    context.CancelFunc
-	runDone   chan struct{}
-	running   bool
-	closed    bool
-	started   bool
-	wg        sync.WaitGroup
-	closeOnce sync.Once
-	closeErr  error
+	cfg        config.Config
+	seer       seerClient
+	store      subscriptionStore
+	bot        notifier
+	health     *healthServer
+	metrics    *Metrics
+	logger     *slog.Logger
+	mu         sync.Mutex
+	approvalMu sync.Mutex
+	cancel     context.CancelFunc
+	runDone    chan struct{}
+	running    bool
+	closed     bool
+	started    bool
+	wg         sync.WaitGroup
+	closeOnce  sync.Once
+	closeErr   error
 }
 
 func New(cfg config.Config, logger *slog.Logger) (*Runner, error) {

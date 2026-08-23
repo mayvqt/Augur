@@ -121,12 +121,27 @@ func (f *fakeSeer) Request(ctx context.Context, id int) (seer.Request, error) {
 	return f.requestByID[id], nil
 }
 
+func (f *fakeSeer) UpdateRequestStatus(ctx context.Context, id int, action string) (seer.Request, error) {
+	if err := ctx.Err(); err != nil {
+		return seer.Request{}, err
+	}
+	status := 2
+	if action == "decline" {
+		status = 3
+	}
+	request := f.requestByID[id]
+	request.ID = id
+	request.Status = status
+	return request, nil
+}
+
 type fakeStore struct {
 	pending     []storage.Subscription
 	pendingByID map[int]storage.Subscription
 	added       []storage.Subscription
 	completed   []storage.Subscription
 	pingErr     error
+	approval    storage.ApprovalSettings
 }
 
 func (f *fakeStore) AddSubscription(ctx context.Context, subscription storage.Subscription) (bool, error) {
@@ -166,6 +181,27 @@ func (f *fakeStore) Ping(ctx context.Context) error {
 		return err
 	}
 	return f.pingErr
+}
+
+func (f *fakeStore) SetApprovalSettings(ctx context.Context, settings storage.ApprovalSettings) error {
+	f.approval = settings
+	return ctx.Err()
+}
+
+func (f *fakeStore) ApprovalSettings(ctx context.Context, guildID string) (storage.ApprovalSettings, bool, error) {
+	return f.approval, f.approval.GuildID == guildID, ctx.Err()
+}
+
+func (f *fakeStore) ClaimApprovalMessage(ctx context.Context, message storage.ApprovalMessage) (bool, error) {
+	return true, ctx.Err()
+}
+
+func (f *fakeStore) FinishApprovalMessage(ctx context.Context, message storage.ApprovalMessage) error {
+	return ctx.Err()
+}
+
+func (f *fakeStore) ReleaseApprovalMessage(ctx context.Context, requestID int, guildID string) error {
+	return ctx.Err()
 }
 
 func (f *fakeStore) Close() error {

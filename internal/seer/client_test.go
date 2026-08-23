@@ -269,6 +269,23 @@ func TestRequestRejectsMismatchedResponseID(t *testing.T) {
 	}
 }
 
+func TestUpdateRequestStatusUsesApprovalEndpoint(t *testing.T) {
+	client := newTestClient(t)
+	client.httpClient = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/request/44/approve" {
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+		return jsonResponse(t, Request{ID: 44, Status: 2}), nil
+	})}
+	request, err := client.UpdateRequestStatus(context.Background(), 44, "approve")
+	if err != nil || request.ID != 44 || !strings.EqualFold(RequestStatusLabel(request.Status), "Approved") {
+		t.Fatalf("UpdateRequestStatus() = %#v, %v", request, err)
+	}
+	if _, err := client.UpdateRequestStatus(context.Background(), 44, "delete"); err == nil {
+		t.Fatal("UpdateRequestStatus accepted an unsupported action")
+	}
+}
+
 func TestClientMethodsValidateIdentifiersBeforeHTTP(t *testing.T) {
 	t.Parallel()
 	client := newTestClient(t)

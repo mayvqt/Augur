@@ -156,6 +156,36 @@ func TestCompleteSubscriptionValidatesRequestID(t *testing.T) {
 	}
 }
 
+func TestApprovalSettingsAndMessageDedupe(t *testing.T) {
+	store, err := Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ctx := context.Background()
+	settings := ApprovalSettings{GuildID: "123", ChannelID: "456", Enabled: true}
+	if err := store.SetApprovalSettings(ctx, settings); err != nil {
+		t.Fatal(err)
+	}
+	got, ok, err := store.ApprovalSettings(ctx, "123")
+	if err != nil || !ok || got != settings {
+		t.Fatalf("ApprovalSettings() = %#v, %t, %v", got, ok, err)
+	}
+	message := ApprovalMessage{RequestID: 42, GuildID: "123", ChannelID: "456"}
+	claimed, err := store.ClaimApprovalMessage(ctx, message)
+	if err != nil || !claimed {
+		t.Fatalf("first claim = %t, %v", claimed, err)
+	}
+	claimed, err = store.ClaimApprovalMessage(ctx, message)
+	if err != nil || claimed {
+		t.Fatalf("duplicate claim = %t, %v", claimed, err)
+	}
+	message.MessageID = "789"
+	if err := store.FinishApprovalMessage(ctx, message); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestCompleteSubscriptionRejectsTimeBeforeCreation(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

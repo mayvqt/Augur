@@ -26,6 +26,41 @@ func (b *Bot) handleCommand(s interactionSession, i *discordgo.InteractionCreate
 		b.handleLink(s, i)
 	case commandRequest:
 		b.handleRequest(s, i)
+	case commandSetup:
+		b.handleSetup(s, i)
+	}
+}
+
+func (b *Bot) handleSetup(s interactionSession, i *discordgo.InteractionCreate) {
+	if i.GuildID == "" || !canManageServer(i) {
+		b.ephemeral(s, i, "You need Manage Server permission to configure approval messages.")
+		return
+	}
+	enabled := false
+	channelID := ""
+	for _, option := range i.ApplicationCommandData().Options {
+		switch option.Name {
+		case "enabled":
+			enabled = option.BoolValue()
+		case "channel":
+			channelID, _ = option.Value.(string)
+		}
+	}
+	if enabled && channelID == "" {
+		b.ephemeral(s, i, "Choose a channel when enabling approval messages.")
+		return
+	}
+	ctx, cancel := context.WithTimeout(b.ctx, 10*time.Second)
+	defer cancel()
+	if err := b.handler.ConfigureApprovals(ctx, i.GuildID, channelID, enabled); err != nil {
+		b.logger.Error("configure approval messages", "guild_id", i.GuildID, "error", err)
+		b.ephemeral(s, i, "Could not save the approval settings. Try again.")
+		return
+	}
+	if enabled {
+		b.ephemeral(s, i, "Approval messages are enabled in <#"+channelID+">.")
+	} else {
+		b.ephemeral(s, i, "Approval messages are disabled for this server.")
 	}
 }
 
@@ -141,6 +176,10 @@ func (b *Bot) handleComponent(s interactionSession, i *discordgo.InteractionCrea
 		b.handleRetry(s, i, data)
 	case strings.HasPrefix(data.CustomID, componentSearch):
 		b.handleSearchRetry(s, i, data)
+	case strings.HasPrefix(data.CustomID, componentApprove):
+		b.handleApproval(s, i, data, "approve")
+	case strings.HasPrefix(data.CustomID, componentDecline):
+		b.handleApproval(s, i, data, "decline")
 	}
 }
 
@@ -287,7 +326,7 @@ func (b *Bot) submitRequest(s interactionSession, i *discordgo.InteractionCreate
 	}
 	ctx, cancel := context.WithTimeout(b.ctx, 30*time.Second)
 	defer cancel()
-	_, err := b.handler.Request(ctx, ownerID, result, seasons)
+	req, err := b.handler.Request(ctx, ownerID, result, seasons)
 	if err != nil {
 		message := "Request failed. Try again in a minute."
 		var userErr interface{ UserMessage() string }
@@ -299,12 +338,133 @@ func (b *Bot) submitRequest(s interactionSession, i *discordgo.InteractionCreate
 		return
 	}
 	b.cache.discard(cacheID, ownerID)
+	if seer.IsPendingRequest(req.Status) {
+		b.postApproval(ctx, i.GuildID, req.ID, ownerID, result, seasons)
+	}
 	title := escapeMarkdown(optionLabel(result))
 	selection := ""
 	if result.MediaType == "tv" {
 		selection = "\nSelected: **" + escapeMarkdown(seasonSelectionLabel(seasons)) + "**"
 	}
 	b.edit(s, i, fmt.Sprintf("Your request for **%s** has been submitted successfully.%s\nYou will receive a direct message when it is fully available.", title, selection))
+}
+
+func (b *Bot) postApproval(ctx context.Context, guildID string, requestID int, requesterID string, result seer.SearchResult, seasons seer.SeasonSelection) {
+	if guildID == "" || requestID <= 0 {
+		return
+	}
+	channelID, enabled, err := b.handler.ApprovalChannel(ctx, guildID)
+	if err != nil || !enabled {
+		if err != nil {
+			b.logger.Error("load approval channel", "guild_id", guildID, "error", err)
+		}
+		return
+	}
+	claimed, err := b.handler.ClaimApproval(ctx, requestID, guildID, channelID)
+	if err != nil || !claimed {
+		if err != nil {
+			b.logger.Error("claim approval message", "request_id", requestID, "error", err)
+		}
+		return
+	}
+	embed := b.mediaPreview(result, nil)
+	embed.Color = 0xFEE75C
+	embed.Fields = []*discordgo.MessageEmbedField{
+		{Name: "Requested by", Value: "<@" + requesterID + ">", Inline: true},
+		{Name: "Status", Value: "Pending approval", Inline: true},
+	}
+	if result.MediaType == "tv" {
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Seasons", Value: seasonSelectionLabel(seasons), Inline: true})
+	}
+	embed.Footer = &discordgo.MessageEmbedFooter{Text: fmt.Sprintf("Seerr request #%d", requestID)}
+	message, err := b.session.ChannelMessageSendComplex(channelID, &discordgo.MessageSend{
+		Embeds:          []*discordgo.MessageEmbed{embed},
+		Components:      approvalComponents(requestID),
+		AllowedMentions: noMentions(),
+	})
+	if err != nil {
+		_ = b.handler.ReleaseApproval(ctx, requestID, guildID)
+		b.logger.Error("send approval message", "request_id", requestID, "channel_id", channelID, "error", err)
+		return
+	}
+	if err := b.handler.FinishApproval(ctx, requestID, guildID, channelID, message.ID); err != nil {
+		b.logger.Error("save approval message", "request_id", requestID, "error", err)
+	}
+}
+
+func approvalComponents(requestID int) []discordgo.MessageComponent {
+	id := strconv.Itoa(requestID)
+	return []discordgo.MessageComponent{discordgo.ActionsRow{Components: []discordgo.MessageComponent{
+		discordgo.Button{CustomID: componentApprove + id, Label: "Approve", Style: discordgo.SuccessButton},
+		discordgo.Button{CustomID: componentDecline + id, Label: "Decline", Style: discordgo.DangerButton},
+	}}}
+}
+
+func (b *Bot) handleApproval(s interactionSession, i *discordgo.InteractionCreate, data discordgo.MessageComponentInteractionData, action string) {
+	if i.GuildID == "" || !canManageServer(i) {
+		b.ephemeral(s, i, "You need Manage Server permission to approve or decline requests.")
+		return
+	}
+	prefix := componentApprove
+	if action == "decline" {
+		prefix = componentDecline
+	}
+	requestID, err := strconv.Atoi(strings.TrimPrefix(data.CustomID, prefix))
+	if err != nil || requestID <= 0 {
+		b.ephemeral(s, i, "That approval button is invalid.")
+		return
+	}
+	if !b.deferComponentUpdate(s, i) {
+		return
+	}
+	ctx, cancel := context.WithTimeout(b.ctx, 30*time.Second)
+	defer cancel()
+	request, err := b.handler.DecideRequest(ctx, requestID, action)
+	if err != nil {
+		b.logger.Error("update Seerr request", "request_id", requestID, "action", action, "error", err)
+		b.editContent(s, i, "Seerr could not update this request. Try again.", approvalComponents(requestID), "restore failed approval")
+		return
+	}
+	status := seer.RequestStatusLabel(request.Status)
+	if len(i.Message.Embeds) > 0 {
+		embed := *i.Message.Embeds[0]
+		embed.Color = 0x57F287
+		if status == "Declined" {
+			embed.Color = 0xED4245
+		}
+		for _, field := range embed.Fields {
+			if field.Name == "Status" {
+				field.Value = status
+			}
+		}
+		embed.Footer = &discordgo.MessageEmbedFooter{Text: fmt.Sprintf("Seerr request #%d · %s by %s", requestID, status, interactionDisplayName(i))}
+		empty := ""
+		components := []discordgo.MessageComponent{}
+		_, err = s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{Content: &empty, Embeds: &[]*discordgo.MessageEmbed{&embed}, Components: &components, AllowedMentions: noMentions()})
+		if err != nil {
+			b.logger.Error("update approval message", "request_id", requestID, "error", err)
+		}
+	}
+}
+
+func interactionDisplayName(i *discordgo.InteractionCreate) string {
+	if i.Member != nil {
+		if i.Member.Nick != "" {
+			return normalizeInlineText(i.Member.Nick)
+		}
+		if i.Member.User != nil {
+			return normalizeInlineText(i.Member.User.Username)
+		}
+	}
+	return "an administrator"
+}
+
+func canManageServer(i *discordgo.InteractionCreate) bool {
+	if i == nil || i.Member == nil {
+		return false
+	}
+	permissions := i.Member.Permissions
+	return permissions&discordgo.PermissionAdministrator != 0 || permissions&discordgo.PermissionManageServer != 0
 }
 
 func (b *Bot) handleBack(s interactionSession, i *discordgo.InteractionCreate, data discordgo.MessageComponentInteractionData) {

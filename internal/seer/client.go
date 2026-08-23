@@ -340,6 +340,23 @@ func (c *Client) Request(ctx context.Context, id int) (Request, error) {
 	return out, nil
 }
 
+func (c *Client) UpdateRequestStatus(ctx context.Context, id int, action string) (Request, error) {
+	if id <= 0 {
+		return Request{}, errors.New("request ID must be positive")
+	}
+	if action != "approve" && action != "decline" {
+		return Request{}, fmt.Errorf("unsupported request action %q", action)
+	}
+	var out Request
+	if err := c.do(ctx, http.MethodPost, "/api/v1/request/"+strconv.Itoa(id)+"/"+action, nil, &out); err != nil {
+		return Request{}, err
+	}
+	if out.ID != id {
+		return Request{}, fmt.Errorf("seerr request response ID is %d, expected %d", out.ID, id)
+	}
+	return out, nil
+}
+
 func (c *Client) NotificationSettings(ctx context.Context, userID int) (NotificationSettings, error) {
 	if userID <= 0 {
 		return NotificationSettings{}, errors.New("user ID must be positive")

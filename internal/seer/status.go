@@ -26,6 +26,37 @@ func IsAvailable(req Request) bool {
 	return false
 }
 
+func IsPendingRequest(status any) bool {
+	return requestStatusCode(status) == 1
+}
+
+func RequestStatusLabel(status any) string {
+	switch requestStatusCode(status) {
+	case 1:
+		return "Pending approval"
+	case 2:
+		return "Approved"
+	case 3:
+		return "Declined"
+	default:
+		return "Unknown"
+	}
+}
+
+func requestStatusCode(status any) int64 {
+	if text, ok := status.(string); ok {
+		switch strings.ToLower(strings.TrimSpace(text)) {
+		case "pending":
+			return 1
+		case "approved", "approve":
+			return 2
+		case "declined", "decline":
+			return 3
+		}
+	}
+	return mediaStatusCode(status)
+}
+
 func IsMediaAvailable(status any) bool {
 	return mediaStatusCode(status) == 5
 }

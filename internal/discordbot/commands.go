@@ -5,6 +5,7 @@ import "github.com/bwmarrin/discordgo"
 const (
 	commandLink      = "link"
 	commandRequest   = "request"
+	commandSetup     = "setup"
 	componentPick    = "augur:pick:"
 	componentSeasons = "augur:seasons:"
 	componentAll     = "augur:all:"
@@ -12,6 +13,8 @@ const (
 	componentBack    = "augur:back:"
 	componentRetry   = "augur:retry:"
 	componentSearch  = "augur:retry-search:"
+	componentApprove = "augur:approve:"
+	componentDecline = "augur:decline:"
 )
 
 func slashCommands() []*discordgo.ApplicationCommand {
@@ -29,5 +32,17 @@ func slashCommands() []*discordgo.ApplicationCommand {
 				MaxLength:   100,
 			}},
 		},
+		{
+			Name: commandSetup, Description: "Configure Augur for this server.", DMPermission: boolPtr(false),
+			DefaultMemberPermissions: permissionPtr(discordgo.PermissionManageServer),
+			Options: []*discordgo.ApplicationCommandOption{
+				{Type: discordgo.ApplicationCommandOptionBoolean, Name: "enabled", Description: "Enable or disable approval messages", Required: true},
+				{Type: discordgo.ApplicationCommandOptionChannel, Name: "channel", Description: "Channel for approval messages", ChannelTypes: []discordgo.ChannelType{discordgo.ChannelTypeGuildText}},
+			},
+		},
 	}
 }
+
+func boolPtr(value bool) *bool { return &value }
+
+func permissionPtr(value int64) *int64 { return &value }
