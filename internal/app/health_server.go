@@ -15,7 +15,7 @@ import (
 
 type healthServer struct {
 	cfg     config.HealthConfig
-	store   subscriptionStore
+	store   stateStore
 	metrics *Metrics
 	logger  *slog.Logger
 	server  *http.Server
@@ -23,7 +23,7 @@ type healthServer struct {
 	ready   atomic.Bool
 }
 
-func newHealthServer(cfg config.HealthConfig, store subscriptionStore, metrics *Metrics, logger *slog.Logger) *healthServer {
+func newHealthServer(cfg config.HealthConfig, store stateStore, metrics *Metrics, logger *slog.Logger) *healthServer {
 	mux := http.NewServeMux()
 	server := &healthServer{cfg: cfg, store: store, metrics: metrics, logger: logger}
 	mux.HandleFunc("/healthz", server.healthz)

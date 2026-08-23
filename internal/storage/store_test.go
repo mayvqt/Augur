@@ -192,6 +192,21 @@ func TestApprovalSettingsAndMessageDedupe(t *testing.T) {
 	if err != nil || needed {
 		t.Fatalf("NeedsApprovalMessage after claim = %t, %v", needed, err)
 	}
+	decidedAt := time.Now().UTC().Add(-3 * time.Minute)
+	if err := store.MarkApprovalMessageDecided(ctx, 42, "123", decidedAt); err != nil {
+		t.Fatal(err)
+	}
+	due, err := store.DueApprovalMessages(ctx, time.Now().UTC().Add(-2*time.Minute))
+	if err != nil || len(due) != 1 || due[0].MessageID != "789" {
+		t.Fatalf("DueApprovalMessages() = %#v, %v", due, err)
+	}
+	if err := store.DeleteApprovalMessage(ctx, 42, "123"); err != nil {
+		t.Fatal(err)
+	}
+	due, err = store.DueApprovalMessages(ctx, time.Now().UTC())
+	if err != nil || len(due) != 0 {
+		t.Fatalf("due messages after delete = %#v, %v", due, err)
+	}
 }
 
 func TestCompleteSubscriptionRejectsTimeBeforeCreation(t *testing.T) {

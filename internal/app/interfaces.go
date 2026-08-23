@@ -18,9 +18,10 @@ type seerClient interface {
 	Request(ctx context.Context, id int) (seer.Request, error)
 	PendingRequests(ctx context.Context) ([]seer.Request, error)
 	UpdateRequestStatus(ctx context.Context, id int, action string) (seer.Request, error)
+	NotificationSettings(ctx context.Context, userID int) (seer.NotificationSettings, error)
 }
 
-type subscriptionStore interface {
+type stateStore interface {
 	AddSubscription(ctx context.Context, subscription storage.Subscription) (bool, error)
 	PendingSubscriptions(ctx context.Context) ([]storage.Subscription, error)
 	CompleteSubscription(ctx context.Context, requestID int, discordID string, completedAt time.Time) (storage.Subscription, bool, error)
@@ -31,6 +32,9 @@ type subscriptionStore interface {
 	ClaimApprovalMessage(ctx context.Context, message storage.ApprovalMessage) (bool, error)
 	FinishApprovalMessage(ctx context.Context, message storage.ApprovalMessage) error
 	ReleaseApprovalMessage(ctx context.Context, requestID int, guildID string) error
+	MarkApprovalMessageDecided(ctx context.Context, requestID int, guildID string, decidedAt time.Time) error
+	DueApprovalMessages(ctx context.Context, before time.Time) ([]storage.ApprovalMessage, error)
+	DeleteApprovalMessage(ctx context.Context, requestID int, guildID string) error
 	Ping(ctx context.Context) error
 	Close() error
 }

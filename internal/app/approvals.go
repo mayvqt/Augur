@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"strings"
+	"time"
 
 	"github.com/mayvqt/Augur/internal/seer"
 	"github.com/mayvqt/Augur/internal/storage"
@@ -36,6 +37,26 @@ func (r *Runner) ReleaseApproval(ctx context.Context, requestID int, guildID str
 	return r.store.ReleaseApprovalMessage(ctx, requestID, guildID)
 }
 
+func (r *Runner) MarkApprovalDecided(ctx context.Context, requestID int, guildID string, decidedAt time.Time) error {
+	return r.store.MarkApprovalMessageDecided(ctx, requestID, guildID, decidedAt)
+}
+
+func (r *Runner) DueApprovalMessages(ctx context.Context, before time.Time) ([]storage.ApprovalMessage, error) {
+	return r.store.DueApprovalMessages(ctx, before)
+}
+
+func (r *Runner) DeleteApprovalRecord(ctx context.Context, requestID int, guildID string) error {
+	return r.store.DeleteApprovalMessage(ctx, requestID, guildID)
+}
+
+func (r *Runner) RequesterDiscordIDs(ctx context.Context, userID int) ([]string, error) {
+	settings, err := r.seer.NotificationSettings(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	return settings.DiscordIDs, nil
+}
+
 func (r *Runner) DecideRequest(ctx context.Context, requestID int, action string) (seer.Request, error) {
 	r.approvalMu.Lock()
 	defer r.approvalMu.Unlock()
@@ -46,5 +67,9 @@ func (r *Runner) DecideRequest(ctx context.Context, requestID int, action string
 	if !seer.IsPendingRequest(current.Status) {
 		return current, nil
 	}
-	return r.seer.UpdateRequestStatus(ctx, requestID, strings.ToLower(strings.TrimSpace(action)))
+	updated, err := r.seer.UpdateRequestStatus(ctx, requestID, strings.ToLower(strings.TrimSpace(action)))
+	if err == nil && updated.RequestedBy == nil {
+		updated.RequestedBy = current.RequestedBy
+	}
+	return updated, err
 }

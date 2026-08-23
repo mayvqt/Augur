@@ -41,6 +41,7 @@ type ApprovalMessage struct {
 	GuildID   string
 	ChannelID string
 	MessageID string
+	DecidedAt time.Time
 }
 
 const subscriptionColumnList = "request_id, discord_id, title, media_type, overview, poster_path, release_year, language, rating, created_at, completed_at"
@@ -298,6 +299,56 @@ func (s *Store) ReleaseApprovalMessage(ctx context.Context, requestID int, guild
 	return err
 }
 
+func (s *Store) MarkApprovalMessageDecided(ctx context.Context, requestID int, guildID string, decidedAt time.Time) error {
+	if requestID <= 0 || strings.TrimSpace(guildID) == "" {
+		return errors.New("request_id and guild_id are required")
+	}
+	if decidedAt.IsZero() {
+		decidedAt = time.Now().UTC()
+	}
+	_, err := s.db.ExecContext(ctx, `UPDATE approval_messages SET decided_at = ? WHERE request_id = ? AND guild_id = ?`, formatTime(decidedAt), requestID, guildID)
+	if err != nil {
+		return fmt.Errorf("mark approval message decided: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) DueApprovalMessages(ctx context.Context, before time.Time) ([]ApprovalMessage, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT request_id, guild_id, channel_id, message_id, decided_at
+		FROM approval_messages
+		WHERE decided_at IS NOT NULL AND decided_at <= ? AND message_id != ''
+		ORDER BY decided_at, request_id
+	`, formatTime(before.UTC()))
+	if err != nil {
+		return nil, fmt.Errorf("list due approval messages: %w", err)
+	}
+	defer rows.Close()
+	var messages []ApprovalMessage
+	for rows.Next() {
+		var message ApprovalMessage
+		var decidedAt string
+		if err := rows.Scan(&message.RequestID, &message.GuildID, &message.ChannelID, &message.MessageID, &decidedAt); err != nil {
+			return nil, fmt.Errorf("scan due approval message: %w", err)
+		}
+		parsed, err := parseTime(decidedAt)
+		if err != nil {
+			return nil, fmt.Errorf("parse approval decision time: %w", err)
+		}
+		message.DecidedAt = parsed
+		messages = append(messages, message)
+	}
+	return messages, rows.Err()
+}
+
+func (s *Store) DeleteApprovalMessage(ctx context.Context, requestID int, guildID string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM approval_messages WHERE request_id = ? AND guild_id = ?`, requestID, strings.TrimSpace(guildID))
+	if err != nil {
+		return fmt.Errorf("delete approval message: %w", err)
+	}
+	return nil
+}
+
 func (s *Store) initialize(ctx context.Context) error {
 	pragmas := []string{
 		"PRAGMA busy_timeout = 5000",
@@ -337,10 +388,20 @@ func (s *Store) initialize(ctx context.Context) error {
 			guild_id TEXT NOT NULL,
 			channel_id TEXT NOT NULL,
 			message_id TEXT NOT NULL DEFAULT '',
+			decided_at TEXT,
 			PRIMARY KEY (request_id, guild_id)
 		);
 	`); err != nil {
 		return fmt.Errorf("initialize schema: %w", err)
+	}
+	approvalColumns, err := s.tableColumns(ctx, "approval_messages")
+	if err != nil {
+		return err
+	}
+	if _, exists := approvalColumns["decided_at"]; !exists {
+		if _, err := s.db.ExecContext(ctx, "ALTER TABLE approval_messages ADD COLUMN decided_at TEXT"); err != nil {
+			return fmt.Errorf("add approval decision column: %w", err)
+		}
 	}
 	existingColumns, err := s.subscriptionColumns(ctx)
 	if err != nil {
@@ -367,9 +428,16 @@ func (s *Store) initialize(ctx context.Context) error {
 }
 
 func (s *Store) subscriptionColumns(ctx context.Context) (map[string]struct{}, error) {
-	rows, err := s.db.QueryContext(ctx, "PRAGMA table_info(subscriptions)")
+	return s.tableColumns(ctx, "subscriptions")
+}
+
+func (s *Store) tableColumns(ctx context.Context, table string) (map[string]struct{}, error) {
+	if table != "subscriptions" && table != "approval_messages" {
+		return nil, errors.New("unsupported schema table")
+	}
+	rows, err := s.db.QueryContext(ctx, "PRAGMA table_info("+table+")")
 	if err != nil {
-		return nil, fmt.Errorf("inspect subscription schema: %w", err)
+		return nil, fmt.Errorf("inspect %s schema: %w", table, err)
 	}
 	defer rows.Close()
 	columns := make(map[string]struct{})
@@ -378,12 +446,12 @@ func (s *Store) subscriptionColumns(ctx context.Context) (map[string]struct{}, e
 		var columnName, columnType string
 		var defaultValue any
 		if err := rows.Scan(&cid, &columnName, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
-			return nil, fmt.Errorf("inspect subscription column: %w", err)
+			return nil, fmt.Errorf("inspect %s column: %w", table, err)
 		}
 		columns[columnName] = struct{}{}
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("inspect subscription schema: %w", err)
+		return nil, fmt.Errorf("inspect %s schema: %w", table, err)
 	}
 	return columns, nil
 }

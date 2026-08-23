@@ -17,7 +17,7 @@ import (
 type Runner struct {
 	cfg        config.Config
 	seer       seerClient
-	store      subscriptionStore
+	store      stateStore
 	bot        notifier
 	health     *healthServer
 	metrics    *Metrics
@@ -69,7 +69,7 @@ func New(cfg config.Config, logger *slog.Logger) (*Runner, error) {
 	return runner, nil
 }
 
-func newWithDeps(cfg config.Config, seer seerClient, store subscriptionStore, bot notifier, logger *slog.Logger) *Runner {
+func newWithDeps(cfg config.Config, seer seerClient, store stateStore, bot notifier, logger *slog.Logger) *Runner {
 	if logger == nil {
 		logger = slog.Default()
 	}

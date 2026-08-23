@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"time"
 
 	"github.com/mayvqt/Augur/internal/config"
 	"github.com/mayvqt/Augur/internal/seer"
@@ -23,7 +24,11 @@ type Handler interface {
 	ClaimApproval(ctx context.Context, requestID int, guildID, channelID string) (bool, error)
 	FinishApproval(ctx context.Context, requestID int, guildID, channelID, messageID string) error
 	ReleaseApproval(ctx context.Context, requestID int, guildID string) error
+	MarkApprovalDecided(ctx context.Context, requestID int, guildID string, decidedAt time.Time) error
+	DueApprovalMessages(ctx context.Context, before time.Time) ([]storage.ApprovalMessage, error)
+	DeleteApprovalRecord(ctx context.Context, requestID int, guildID string) error
 	DecideRequest(ctx context.Context, requestID int, action string) (seer.Request, error)
+	RequesterDiscordIDs(ctx context.Context, userID int) ([]string, error)
 }
 
 type interactionSession interface {

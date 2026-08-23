@@ -205,6 +205,31 @@ func TestEphemeralDisablesMentions(t *testing.T) {
 	}
 }
 
+func TestDecisionEmbedIsHumanReadable(t *testing.T) {
+	t.Parallel()
+	source := &discordgo.MessageEmbed{Title: "Arrival (2016)", URL: "https://seerr.test/movie/329865", Thumbnail: &discordgo.MessageEmbedThumbnail{URL: "https://image.test/poster.jpg"}}
+	embed := decisionEmbed(source, "Approved")
+	if embed.Title != "Your Seerr request was approved" || embed.Description != "Arrival (2016)" || embed.Color != 0x57F287 {
+		t.Fatalf("approved embed = %#v", embed)
+	}
+	declined := decisionEmbed(source, "Declined")
+	if declined.Color != 0xED4245 {
+		t.Fatalf("declined color = %#x", declined.Color)
+	}
+}
+
+func TestApprovalRequestIDRejectsWrongActionsAndMalformedIDs(t *testing.T) {
+	t.Parallel()
+	if id, ok := approvalRequestID(componentApprove+"42", "approve"); !ok || id != 42 {
+		t.Fatalf("approvalRequestID() = %d, %t", id, ok)
+	}
+	for _, value := range []string{componentDecline + "42", componentApprove + "0", componentApprove + "bad"} {
+		if _, ok := approvalRequestID(value, "approve"); ok {
+			t.Fatalf("approvalRequestID accepted %q", value)
+		}
+	}
+}
+
 type fakeInteractionSession struct {
 	response *discordgo.InteractionResponse
 	edit     *discordgo.WebhookEdit

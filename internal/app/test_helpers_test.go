@@ -12,7 +12,7 @@ import (
 	"github.com/mayvqt/Augur/internal/storage"
 )
 
-func newTestRunner(cfg config.Config, seerClient seerClient, store subscriptionStore, bot notifier) *Runner {
+func newTestRunner(cfg config.Config, seerClient seerClient, store stateStore, bot notifier) *Runner {
 	return newWithDeps(cfg, seerClient, store, bot, slog.New(slog.NewTextHandler(io.Discard, nil)))
 }
 
@@ -129,6 +129,10 @@ func (f *fakeSeer) PendingRequests(ctx context.Context) ([]seer.Request, error) 
 	return append([]seer.Request(nil), f.pendingRequests...), nil
 }
 
+func (f *fakeSeer) NotificationSettings(ctx context.Context, userID int) (seer.NotificationSettings, error) {
+	return seer.NotificationSettings{}, ctx.Err()
+}
+
 func (f *fakeSeer) UpdateRequestStatus(ctx context.Context, id int, action string) (seer.Request, error) {
 	if err := ctx.Err(); err != nil {
 		return seer.Request{}, err
@@ -223,6 +227,18 @@ func (f *fakeStore) FinishApprovalMessage(ctx context.Context, message storage.A
 }
 
 func (f *fakeStore) ReleaseApprovalMessage(ctx context.Context, requestID int, guildID string) error {
+	return ctx.Err()
+}
+
+func (f *fakeStore) MarkApprovalMessageDecided(ctx context.Context, requestID int, guildID string, decidedAt time.Time) error {
+	return ctx.Err()
+}
+
+func (f *fakeStore) DueApprovalMessages(ctx context.Context, before time.Time) ([]storage.ApprovalMessage, error) {
+	return nil, ctx.Err()
+}
+
+func (f *fakeStore) DeleteApprovalMessage(ctx context.Context, requestID int, guildID string) error {
 	return ctx.Err()
 }
 
