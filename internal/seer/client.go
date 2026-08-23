@@ -381,7 +381,7 @@ func (c *Client) PendingRequests(ctx context.Context) ([]Request, error) {
 			return requests, nil
 		}
 		if skip > math.MaxInt-pageSize {
-			return nil, errors.New("Seerr pending request pagination overflowed")
+			return nil, errors.New("seerr pending request pagination overflowed")
 		}
 	}
 }
