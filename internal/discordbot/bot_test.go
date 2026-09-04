@@ -230,6 +230,30 @@ func TestApprovalRequestIDRejectsWrongActionsAndMalformedIDs(t *testing.T) {
 	}
 }
 
+func TestSetupCommandCanShowCurrentSettings(t *testing.T) {
+	t.Parallel()
+	commands := slashCommands()
+	setup := commands[len(commands)-1]
+	if setup.Name != commandSetup || setup.Options[0].Required {
+		t.Fatalf("setup command = %#v, want optional enabled setting", setup)
+	}
+}
+
+func TestMissingApprovalPermissions(t *testing.T) {
+	t.Parallel()
+	all := int64(discordgo.PermissionViewChannel | discordgo.PermissionSendMessages | discordgo.PermissionEmbedLinks | discordgo.PermissionManageMessages)
+	if missing := missingApprovalPermissions(all); len(missing) != 0 {
+		t.Fatalf("missing permissions = %#v, want none", missing)
+	}
+	missing := missingApprovalPermissions(discordgo.PermissionViewChannel | discordgo.PermissionSendMessages)
+	if len(missing) != 2 || missing[0] != "Embed Links" || missing[1] != "Manage Messages" {
+		t.Fatalf("missing permissions = %#v", missing)
+	}
+	if missing := missingApprovalPermissions(discordgo.PermissionAdministrator); len(missing) != 0 {
+		t.Fatalf("administrator missing permissions = %#v", missing)
+	}
+}
+
 type fakeInteractionSession struct {
 	response *discordgo.InteractionResponse
 	edit     *discordgo.WebhookEdit

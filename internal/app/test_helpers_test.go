@@ -154,12 +154,16 @@ type fakeStore struct {
 	added       []storage.Subscription
 	completed   []storage.Subscription
 	pingErr     error
+	addErr      error
 	approval    storage.ApprovalSettings
 }
 
 func (f *fakeStore) AddSubscription(ctx context.Context, subscription storage.Subscription) (bool, error) {
 	if err := ctx.Err(); err != nil {
 		return false, err
+	}
+	if f.addErr != nil {
+		return false, f.addErr
 	}
 	if existing, ok := f.pendingByID[subscription.RequestID]; ok && existing.DiscordID == subscription.DiscordID {
 		return false, nil

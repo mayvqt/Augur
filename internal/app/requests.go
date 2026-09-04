@@ -25,6 +25,24 @@ func (e *userFacingError) UserMessage() string {
 	return e.message
 }
 
+// submittedRequestError reports a local follow-up failure after Seerr has
+// already accepted the request. Callers must not offer to submit it again.
+type submittedRequestError struct {
+	err error
+}
+
+func (e *submittedRequestError) Error() string {
+	return "Seerr accepted the request, but Augur could not track its completion notification: " + e.err.Error()
+}
+
+func (e *submittedRequestError) Unwrap() error { return e.err }
+
+func (e *submittedRequestError) UserMessage() string {
+	return "Seerr accepted your request, but Augur could not track it for a completion notification. Do not retry; check Seerr for its status."
+}
+
+func (e *submittedRequestError) RequestSubmitted() bool { return true }
+
 func (r *Runner) Search(ctx context.Context, query string) ([]seer.SearchResult, error) {
 	r.metrics.searches.Add(1)
 	query = strings.TrimSpace(query)
@@ -133,7 +151,7 @@ func (r *Runner) Request(ctx context.Context, discordID string, result seer.Sear
 	})
 	if err != nil {
 		r.metrics.requestFailures.Add(1)
-		return seer.Request{}, err
+		return req, &submittedRequestError{err: err}
 	}
 	if !inserted {
 		r.metrics.duplicateSubscriptions.Add(1)

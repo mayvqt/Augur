@@ -118,6 +118,28 @@ func TestRunnerRequestAddsSubscription(t *testing.T) {
 	}
 }
 
+func TestRunnerRequestReportsTrackingFailureAfterSeerrAccepts(t *testing.T) {
+	t.Parallel()
+	seerClient := &fakeSeer{
+		user: seer.User{ID: 7}, found: true,
+		createdRequest: seer.Request{ID: 44},
+	}
+	runner := newTestRunner(testConfig(), seerClient, &fakeStore{addErr: errors.New("database unavailable")}, &fakeNotifier{})
+
+	req, err := runner.Request(context.Background(), "123456789012345678", seer.SearchResult{ID: 9, MediaType: "movie", Title: "Arrival"}, seer.SeasonSelection{})
+	if req.ID != 44 {
+		t.Fatalf("request ID = %d, want accepted request 44", req.ID)
+	}
+	var submitted interface{ RequestSubmitted() bool }
+	if !errors.As(err, &submitted) || !submitted.RequestSubmitted() {
+		t.Fatalf("Request() error = %v, want submitted request error", err)
+	}
+	var userErr interface{ UserMessage() string }
+	if !errors.As(err, &userErr) || !strings.Contains(userErr.UserMessage(), "Do not retry") {
+		t.Fatalf("user message = %v, want non-retry guidance", err)
+	}
+}
+
 func TestRunnerRejectsRequestWithoutSeerrID(t *testing.T) {
 	t.Parallel()
 	runner := newTestRunner(testConfig(), &fakeSeer{

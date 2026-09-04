@@ -20,6 +20,18 @@ Optional:
 
 See [`config.example.json`](../config.example.json) for the complete format.
 
+The JSON file also controls settings that do not currently have environment-variable overrides:
+
+- `discord.presence.enabled`: publish a Discord presence (`true` by default)
+- `discord.presence.status`: `online`, `idle`, `dnd`, or `invisible`
+- `discord.presence.type`: `playing`, `watching`, `listening`, or `competing`
+- `discord.presence.message`: presence text shown in Discord
+- `seer.timeout`: timeout for Seerr API calls (`15s` by default)
+
+Server administrators can run `/setup` with no options to inspect the current approval-message setting. Use
+`/setup enabled:true channel:#approvals` to enable it or `/setup enabled:false` to disable it. The bot needs View
+Channel, Send Messages, Embed Links, and Manage Messages permissions in the selected channel.
+
 `AUGUR_DISCORD_TOKEN_FILE` and `AUGUR_SEERR_API_KEY_FILE` can read secrets from mounted files. Do not set both forms of
 the same secret. Keep secrets out of version control; prefer files in containers.
 

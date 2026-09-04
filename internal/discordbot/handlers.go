@@ -300,6 +300,13 @@ func (b *Bot) submitRequest(s interactionSession, i *discordgo.InteractionCreate
 		if errors.As(err, &userErr) {
 			message = userErr.UserMessage()
 		}
+		var submitted interface{ RequestSubmitted() bool }
+		if errors.As(err, &submitted) && submitted.RequestSubmitted() {
+			b.cache.discard(cacheID, ownerID)
+			b.edit(s, i, truncate(message, 300))
+			b.logger.Error("track submitted request", "request_id", req.ID, "media_type", result.MediaType, "media_id", result.ID, "error", err)
+			return
+		}
 		b.editRetry(s, i, truncate(message, 180), cacheID, key)
 		b.logger.Error("request media failed", "media_type", result.MediaType, "media_id", result.ID, "error", err)
 		return

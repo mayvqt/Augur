@@ -36,7 +36,7 @@ func slashCommands() []*discordgo.ApplicationCommand {
 			Name: commandSetup, Description: "Configure Augur for this server.", DMPermission: boolPtr(false),
 			DefaultMemberPermissions: permissionPtr(discordgo.PermissionManageGuild),
 			Options: []*discordgo.ApplicationCommandOption{
-				{Type: discordgo.ApplicationCommandOptionBoolean, Name: "enabled", Description: "Enable or disable approval messages", Required: true},
+				{Type: discordgo.ApplicationCommandOptionBoolean, Name: "enabled", Description: "Enable or disable approval messages (omit to show current settings)"},
 				{Type: discordgo.ApplicationCommandOptionChannel, Name: "channel", Description: "Channel for approval messages", ChannelTypes: []discordgo.ChannelType{discordgo.ChannelTypeGuildText}},
 			},
 		},

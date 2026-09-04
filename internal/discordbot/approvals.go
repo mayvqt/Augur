@@ -21,10 +21,36 @@ func (b *Bot) handleSetup(s interactionSession, i *discordgo.InteractionCreate) 
 		b.ephemeral(s, i, "You need Manage Server permission to configure approval messages.")
 		return
 	}
-	enabled, channelID := setupOptions(i)
+	enabled, enabledSet, channelID := setupOptions(i)
+	if !enabledSet {
+		channelID, currentEnabled, err := b.handler.ApprovalChannel(b.ctx, i.GuildID)
+		if err != nil {
+			b.logger.Error("load approval settings", "guild_id", i.GuildID, "error", err)
+			b.ephemeral(s, i, "Could not load the approval settings. Try again.")
+			return
+		}
+		if currentEnabled {
+			b.ephemeral(s, i, "Approval messages are enabled in <#"+channelID+">.")
+			return
+		}
+		b.ephemeral(s, i, "Approval messages are disabled for this server.")
+		return
+	}
 	if enabled && channelID == "" {
 		b.ephemeral(s, i, "Choose a channel when enabling approval messages.")
 		return
+	}
+	if enabled {
+		permissions, err := b.session.UserChannelPermissions(b.session.State.User.ID, channelID)
+		if err != nil {
+			b.logger.Warn("check approval channel permissions", "guild_id", i.GuildID, "channel_id", channelID, "error", err)
+			b.ephemeral(s, i, "I could not inspect that channel. Make sure it belongs to this server and try again.")
+			return
+		}
+		if missing := missingApprovalPermissions(permissions); len(missing) != 0 {
+			b.ephemeral(s, i, "I need "+strings.Join(missing, ", ")+" in <#"+channelID+"> before approval messages can be enabled.")
+			return
+		}
 	}
 	ctx, cancel := context.WithTimeout(b.ctx, 10*time.Second)
 	defer cancel()
@@ -40,18 +66,39 @@ func (b *Bot) handleSetup(s interactionSession, i *discordgo.InteractionCreate) 
 	b.ephemeral(s, i, "Approval messages are disabled for this server.")
 }
 
-func setupOptions(i *discordgo.InteractionCreate) (bool, string) {
-	var enabled bool
-	var channelID string
+func setupOptions(i *discordgo.InteractionCreate) (enabled bool, enabledSet bool, channelID string) {
 	for _, option := range i.ApplicationCommandData().Options {
 		switch option.Name {
 		case "enabled":
 			enabled = option.BoolValue()
+			enabledSet = true
 		case "channel":
 			channelID, _ = option.Value.(string)
 		}
 	}
-	return enabled, channelID
+	return enabled, enabledSet, channelID
+}
+
+func missingApprovalPermissions(permissions int64) []string {
+	if permissions&discordgo.PermissionAdministrator != 0 {
+		return nil
+	}
+	required := []struct {
+		permission int64
+		label      string
+	}{
+		{discordgo.PermissionViewChannel, "View Channel"},
+		{discordgo.PermissionSendMessages, "Send Messages"},
+		{discordgo.PermissionEmbedLinks, "Embed Links"},
+		{discordgo.PermissionManageMessages, "Manage Messages"},
+	}
+	missing := make([]string, 0, len(required))
+	for _, item := range required {
+		if permissions&item.permission == 0 {
+			missing = append(missing, item.label)
+		}
+	}
+	return missing
 }
 
 func (b *Bot) postApproval(ctx context.Context, guildID string, requestID int, requesterID string, result seer.SearchResult, seasons seer.SeasonSelection) {
