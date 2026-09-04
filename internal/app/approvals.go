@@ -40,9 +40,40 @@ func (r *Runner) ReleaseApproval(ctx context.Context, requestID int, guildID str
 func (r *Runner) MarkApprovalDecided(ctx context.Context, requestID int, guildID string, decidedAt time.Time) error {
 	return r.store.MarkApprovalMessageDecided(ctx, requestID, guildID, decidedAt)
 }
+func (r *Runner) SetApprovalDecision(ctx context.Context, requestID int, guildID, status, reason string) error {
+	return r.store.SetApprovalDecision(ctx, requestID, guildID, status, reason)
+}
+func (r *Runner) ClaimDecisionNotification(ctx context.Context, requestID int, discordID, status string) (bool, error) {
+	return r.store.ClaimDecisionNotification(ctx, requestID, discordID, status)
+}
+func (r *Runner) ReleaseDecisionNotification(ctx context.Context, requestID int, discordID, status string) error {
+	return r.store.ReleaseDecisionNotification(ctx, requestID, discordID, status)
+}
+func (r *Runner) NotificationPreferences(ctx context.Context, discordID string) (storage.NotificationPreferences, error) {
+	return r.store.NotificationPreferences(ctx, discordID)
+}
+func (r *Runner) SetNotificationPreferences(ctx context.Context, preferences storage.NotificationPreferences) error {
+	return r.store.SetNotificationPreferences(ctx, preferences)
+}
+func (r *Runner) RequestsForUser(ctx context.Context, discordID string, limit int) ([]seer.Request, error) {
+	user, err := r.requireLinkedUser(ctx, discordID)
+	if err != nil {
+		return nil, err
+	}
+	return r.seer.RequestsForUser(ctx, user.ID, limit)
+}
+func (r *Runner) RequestStatus(ctx context.Context, requestID int) (seer.Request, error) {
+	return r.seer.Request(ctx, requestID)
+}
+func (r *Runner) MediaDetails(ctx context.Context, mediaType string, mediaID int) (seer.SearchResult, error) {
+	return r.seer.MediaDetails(ctx, mediaType, mediaID)
+}
 
 func (r *Runner) DueApprovalMessages(ctx context.Context, before time.Time) ([]storage.ApprovalMessage, error) {
 	return r.store.DueApprovalMessages(ctx, before)
+}
+func (r *Runner) ApprovalMessages(ctx context.Context) ([]storage.ApprovalMessage, error) {
+	return r.store.ApprovalMessages(ctx)
 }
 
 func (r *Runner) DeleteApprovalRecord(ctx context.Context, requestID int, guildID string) error {

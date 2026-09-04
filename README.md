@@ -19,4 +19,4 @@ Use `/link` to connect a Discord account and `/request` to request media. A serv
 Approval cards cover all Seerr request sources, notify linked requesters of the decision, and are removed two minutes
 after approval or decline.
 
-[Configuration](docs/configuration.md) · [Unraid](docs/unraid.md) · [Development](docs/development.md)
+[Configuration](docs/configuration.md) · [Features](docs/features.md) · [Unraid](docs/unraid.md) · [Development](docs/development.md)

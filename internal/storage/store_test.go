@@ -2,12 +2,129 @@ package storage
 
 import (
 	"context"
+	"database/sql"
 	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
 	"time"
+
+	_ "modernc.org/sqlite"
 )
+
+func TestFreshDatabaseRecordsOrderedMigrations(t *testing.T) {
+	store, err := Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	rows, err := store.db.Query(`SELECT version FROM schema_migrations ORDER BY version`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var versions []int
+	for rows.Next() {
+		var version int
+		if err := rows.Scan(&version); err != nil {
+			t.Fatal(err)
+		}
+		versions = append(versions, version)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(versions); got != 5 {
+		t.Fatalf("migration versions = %v, want 1..5", versions)
+	}
+	for i, version := range versions {
+		if version != i+1 {
+			t.Fatalf("migration versions = %v, want 1..5", versions)
+		}
+	}
+}
+
+func TestExistingMainDatabaseUpgradesWithoutLosingRows(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`
+		CREATE TABLE subscriptions (request_id INTEGER NOT NULL, discord_id TEXT NOT NULL, title TEXT NOT NULL, media_type TEXT NOT NULL, created_at TEXT NOT NULL, completed_at TEXT, PRIMARY KEY(request_id, discord_id));
+		CREATE INDEX idx_subscriptions_open_created ON subscriptions(completed_at, created_at, request_id);
+		ALTER TABLE subscriptions ADD COLUMN overview TEXT NOT NULL DEFAULT '';
+		ALTER TABLE subscriptions ADD COLUMN poster_path TEXT NOT NULL DEFAULT '';
+		ALTER TABLE subscriptions ADD COLUMN release_year TEXT NOT NULL DEFAULT '';
+		ALTER TABLE subscriptions ADD COLUMN language TEXT NOT NULL DEFAULT '';
+		ALTER TABLE subscriptions ADD COLUMN rating REAL NOT NULL DEFAULT 0;
+		CREATE TABLE approval_settings (guild_id TEXT PRIMARY KEY, channel_id TEXT NOT NULL DEFAULT '', enabled INTEGER NOT NULL);
+		CREATE TABLE approval_messages (request_id INTEGER NOT NULL, guild_id TEXT NOT NULL, channel_id TEXT NOT NULL, message_id TEXT NOT NULL DEFAULT '', decided_at TEXT, PRIMARY KEY(request_id, guild_id));
+		INSERT INTO subscriptions VALUES (7, 'user', 'Saved', 'movie', '2026-01-01T00:00:00Z', NULL, 'An overview', '/poster.jpg', '2026', 'en', 8.7);
+		INSERT INTO approval_settings VALUES ('guild', 'channel', 1);
+		INSERT INTO approval_messages VALUES (7, 'guild', 'channel', 'message', '2026-01-02T00:00:00Z');
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	store, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	items, err := store.PendingSubscriptions(context.Background())
+	if err != nil || len(items) != 1 || items[0].Title != "Saved" || items[0].Overview != "An overview" || items[0].PosterPath != "/poster.jpg" || items[0].ReleaseYear != "2026" || items[0].Language != "en" || items[0].Rating != 8.7 {
+		t.Fatalf("upgraded subscriptions = %#v, err %v", items, err)
+	}
+	settings, ok, err := store.ApprovalSettings(context.Background(), "guild")
+	if err != nil || !ok || settings.ChannelID != "channel" || !settings.Enabled {
+		t.Fatalf("upgraded approval settings = %#v, %t, err %v", settings, ok, err)
+	}
+	messages, err := store.ApprovalMessages(context.Background())
+	if err != nil || len(messages) != 1 || messages[0].MessageID != "message" || messages[0].DecidedAt.IsZero() {
+		t.Fatalf("upgraded approval messages = %#v, err %v", messages, err)
+	}
+	for _, table := range []string{"notification_preferences", "decision_notifications"} {
+		var exists int
+		if err := store.db.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&exists); err != nil {
+			t.Fatal(err)
+		}
+		if exists != 1 {
+			t.Fatalf("table %q was not created during upgrade", table)
+		}
+	}
+	var versions int
+	if err := store.db.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&versions); err != nil {
+		t.Fatal(err)
+	}
+	if versions != 5 {
+		t.Fatalf("migration count = %d, want 5", versions)
+	}
+}
+
+func TestNotificationPreferencesDefaultsAndPersistence(t *testing.T) {
+	store, err := Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ctx := context.Background()
+	prefs, err := store.NotificationPreferences(ctx, "user")
+	if err != nil || prefs != (NotificationPreferences{DiscordID: "user", Approved: true, Declined: true, Available: true}) {
+		t.Fatalf("default preferences = %#v, err %v", prefs, err)
+	}
+	want := NotificationPreferences{DiscordID: " user ", Approved: false, Declined: true, Available: false}
+	if err := store.SetNotificationPreferences(ctx, want); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.NotificationPreferences(ctx, "user")
+	if err != nil || got != (NotificationPreferences{DiscordID: "user", Declined: true}) {
+		t.Fatalf("persisted preferences = %#v, err %v", got, err)
+	}
+}
 
 func TestOpenRestrictsDatabasePermissions(t *testing.T) {
 	if runtime.GOOS == "windows" {

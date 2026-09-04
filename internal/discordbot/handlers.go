@@ -24,11 +24,115 @@ func (b *Bot) handleCommand(s interactionSession, i *discordgo.InteractionCreate
 	switch i.ApplicationCommandData().Name {
 	case commandLink:
 		b.handleLink(s, i)
+	case commandRequests:
+		b.handleRequests(s, i)
+	case commandNotifications:
+		b.handleNotifications(s, i)
 	case commandRequest:
 		b.handleRequest(s, i)
 	case commandSetup:
 		b.handleSetup(s, i)
 	}
+}
+
+func (b *Bot) handleRequests(s interactionSession, i *discordgo.InteractionCreate) {
+	ownerID := interactionUserID(i)
+	if ownerID == "" {
+		b.ephemeral(s, i, "Discord did not provide your user ID.")
+		return
+	}
+	if !b.deferInteraction(s, i) {
+		return
+	}
+	ctx, cancel := context.WithTimeout(b.ctx, 20*time.Second)
+	defer cancel()
+	user, err := b.handler.RequestsForUser(ctx, ownerID, 10)
+	if err != nil {
+		b.edit(s, i, "Could not load your requests. Run `/link` first or try again.")
+		return
+	}
+	if len(user) == 0 {
+		b.edit(s, i, "You have no recent requests.")
+		return
+	}
+	titles := make(map[int]string, len(user))
+	for _, req := range user {
+		title := "Untitled request"
+		mediaType := req.Type
+		if req.Media != nil && mediaType == "" {
+			mediaType = req.Media.MediaType
+		}
+		if req.Media != nil && req.Media.TMDBID > 0 && (mediaType == "movie" || mediaType == "tv") {
+			if details, detailsErr := b.handler.MediaDetails(ctx, mediaType, req.Media.TMDBID); detailsErr == nil {
+				title = optionLabel(details)
+			}
+		}
+		titles[req.ID] = title
+	}
+	b.edit(s, i, formatRequestLines(user, titles))
+}
+
+func formatRequestLines(requests []seer.Request, titles map[int]string) string {
+	lines := make([]string, 0, len(requests))
+	for _, req := range requests {
+		title := titles[req.ID]
+		if title == "" {
+			title = "Untitled request"
+		}
+		availability := ""
+		if req.MediaInfo != nil {
+			availability = seer.AvailabilityLabel(req.MediaInfo.Status)
+		}
+		if availability == "" && req.Media != nil {
+			availability = seer.AvailabilityLabel(req.Media.Status)
+		}
+		line := fmt.Sprintf("• #%d — %s — %s", req.ID, truncate(escapeMarkdown(title), 120), seer.RequestStatusLabel(req.Status))
+		if availability != "" {
+			line += " · " + availability
+		}
+		if len(strings.Join(append(lines, line), "\n")) > 1900 {
+			break
+		}
+		lines = append(lines, line)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (b *Bot) handleNotifications(s interactionSession, i *discordgo.InteractionCreate) {
+	id := interactionUserID(i)
+	if id == "" {
+		b.ephemeral(s, i, "Discord did not provide your user ID.")
+		return
+	}
+	ctx, cancel := context.WithTimeout(b.ctx, 10*time.Second)
+	defer cancel()
+	p, err := b.handler.NotificationPreferences(ctx, id)
+	if err != nil {
+		b.ephemeral(s, i, "Could not load notification preferences.")
+		return
+	}
+	changed := false
+	for _, o := range i.ApplicationCommandData().Options {
+		switch o.Name {
+		case "approved":
+			p.Approved = o.BoolValue()
+			changed = true
+		case "declined":
+			p.Declined = o.BoolValue()
+			changed = true
+		case "available":
+			p.Available = o.BoolValue()
+			changed = true
+		}
+	}
+	if changed {
+		p.DiscordID = id
+		if err := b.handler.SetNotificationPreferences(ctx, p); err != nil {
+			b.ephemeral(s, i, "Could not save notification preferences.")
+			return
+		}
+	}
+	b.ephemeral(s, i, fmt.Sprintf("Notifications — approved: %t, declined: %t, available: %t", p.Approved, p.Declined, p.Available))
 }
 
 func (b *Bot) handleLink(s interactionSession, i *discordgo.InteractionCreate) {

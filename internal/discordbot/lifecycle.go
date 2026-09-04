@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/mayvqt/Augur/internal/seer"
@@ -96,6 +97,10 @@ func (b *Bot) onInteraction(s *discordgo.Session, interaction *discordgo.Interac
 		b.handleCommand(s, interaction)
 	case discordgo.InteractionMessageComponent:
 		b.handleComponent(s, interaction)
+	case discordgo.InteractionModalSubmit:
+		if strings.HasPrefix(interaction.ModalSubmitData().CustomID, componentDeclineModal) {
+			b.handleDeclineModal(s, interaction)
+		}
 	}
 }
 

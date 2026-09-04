@@ -47,6 +47,22 @@ func (r *Runner) checkSubscriptions(ctx context.Context) {
 		if !seer.IsAvailable(req) {
 			continue
 		}
+		preferences, err := r.store.NotificationPreferences(ctx, subscription.DiscordID)
+		if err != nil {
+			r.logger.Error("load notification preferences", "request_id", subscription.RequestID, "error", err)
+			continue
+		}
+		if !preferences.Available {
+			completedAt := time.Now().UTC()
+			if completedAt.Before(subscription.CreatedAt) {
+				completedAt = subscription.CreatedAt
+			}
+			if _, _, err := r.store.CompleteSubscription(ctx, subscription.RequestID, subscription.DiscordID, completedAt); err != nil {
+				r.metrics.monitorFailures.Add(1)
+				r.logger.Error("complete subscription without notification", "request_id", subscription.RequestID, "error", err)
+			}
+			continue
+		}
 		media := subscriptionMedia(subscription)
 		if missingMediaMetadata(media) && req.Media != nil && req.Media.TMDBID > 0 {
 			details, err := r.seer.MediaDetails(ctx, subscription.MediaType, req.Media.TMDBID)

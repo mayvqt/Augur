@@ -300,6 +300,25 @@ func TestRunnerKeepsSubscriptionPendingWhenNotificationFails(t *testing.T) {
 	}
 }
 
+func TestRunnerCompletesWithoutNotificationWhenAvailabilityDisabled(t *testing.T) {
+	store := &fakeStore{pending: []storage.Subscription{{RequestID: 44, DiscordID: "123456789012345678", Title: "Arrival", MediaType: "movie"}}, notificationPrefs: &storage.NotificationPreferences{Available: false}}
+	notifier := &fakeNotifier{}
+	runner := newTestRunner(testConfig(), &fakeSeer{requestByID: map[int]seer.Request{44: {ID: 44, Media: &seer.Media{Status: "available"}}}}, store, notifier)
+	runner.checkSubscriptions(context.Background())
+	if len(store.completed) != 1 || len(notifier.notifications) != 0 {
+		t.Fatalf("completed = %d, notifications = %d", len(store.completed), len(notifier.notifications))
+	}
+}
+
+func TestRunnerReportsCompletionFailureWhenAvailabilityDisabled(t *testing.T) {
+	store := &fakeStore{pending: []storage.Subscription{{RequestID: 44, DiscordID: "123456789012345678", Title: "Arrival", MediaType: "movie"}}, notificationPrefs: &storage.NotificationPreferences{Available: false}, completeErr: errors.New("database unavailable")}
+	runner := newTestRunner(testConfig(), &fakeSeer{requestByID: map[int]seer.Request{44: {ID: 44, Media: &seer.Media{Status: "available"}}}}, store, &fakeNotifier{})
+	runner.checkSubscriptions(context.Background())
+	if got := runner.metrics.Snapshot()["monitor_failures"]; got != 1 {
+		t.Fatalf("monitor_failures = %d, want 1", got)
+	}
+}
+
 func TestReconcileApprovalsIncludesWebsiteRequests(t *testing.T) {
 	t.Parallel()
 	seerClient := &fakeSeer{

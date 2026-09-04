@@ -86,6 +86,24 @@ func TestFindUserByDiscordIDUsesNotificationSettings(t *testing.T) {
 	}
 }
 
+func TestRequestsForUserUsesBoundedRecentQuery(t *testing.T) {
+	t.Parallel()
+	client := newTestClient(t)
+	client.httpClient = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path != "/api/v1/request" {
+			return notFoundResponse(), nil
+		}
+		if r.URL.Query().Get("requestedBy") != "9" || r.URL.Query().Get("take") != "25" || r.URL.Query().Get("skip") != "0" {
+			t.Fatalf("query = %s", r.URL.RawQuery)
+		}
+		return jsonResponse(t, map[string]any{"results": []map[string]any{{"id": 1}, {"id": 2}}}), nil
+	})}
+	requests, err := client.RequestsForUser(context.Background(), 9, 25)
+	if err != nil || len(requests) != 2 {
+		t.Fatalf("RequestsForUser() = %#v, %v", requests, err)
+	}
+}
+
 func TestSearchDecodesAndDeduplicatesMediaMetadata(t *testing.T) {
 	t.Parallel()
 	client := newTestClient(t)

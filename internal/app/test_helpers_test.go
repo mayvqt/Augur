@@ -133,6 +133,9 @@ func (f *fakeSeer) PendingRequests(ctx context.Context) ([]seer.Request, error) 
 func (f *fakeSeer) NotificationSettings(ctx context.Context, userID int) (seer.NotificationSettings, error) {
 	return f.notificationSettings, ctx.Err()
 }
+func (f *fakeSeer) RequestsForUser(ctx context.Context, userID, limit int) ([]seer.Request, error) {
+	return append([]seer.Request(nil), f.pendingRequests...), ctx.Err()
+}
 
 func (f *fakeSeer) UpdateRequestStatus(ctx context.Context, id int, action string) (seer.Request, error) {
 	if err := ctx.Err(); err != nil {
@@ -149,13 +152,15 @@ func (f *fakeSeer) UpdateRequestStatus(ctx context.Context, id int, action strin
 }
 
 type fakeStore struct {
-	pending     []storage.Subscription
-	pendingByID map[int]storage.Subscription
-	added       []storage.Subscription
-	completed   []storage.Subscription
-	pingErr     error
-	addErr      error
-	approval    storage.ApprovalSettings
+	pending           []storage.Subscription
+	pendingByID       map[int]storage.Subscription
+	added             []storage.Subscription
+	completed         []storage.Subscription
+	pingErr           error
+	addErr            error
+	approval          storage.ApprovalSettings
+	completeErr       error
+	notificationPrefs *storage.NotificationPreferences
 }
 
 func (f *fakeStore) AddSubscription(ctx context.Context, subscription storage.Subscription) (bool, error) {
@@ -182,6 +187,9 @@ func (f *fakeStore) PendingSubscriptions(ctx context.Context) ([]storage.Subscri
 func (f *fakeStore) CompleteSubscription(ctx context.Context, requestID int, discordID string, completedAt time.Time) (storage.Subscription, bool, error) {
 	if err := ctx.Err(); err != nil {
 		return storage.Subscription{}, false, err
+	}
+	if f.completeErr != nil {
+		return storage.Subscription{}, false, f.completeErr
 	}
 	for _, subscription := range f.pending {
 		if subscription.RequestID == requestID && subscription.DiscordID == discordID {
@@ -244,6 +252,29 @@ func (f *fakeStore) DueApprovalMessages(ctx context.Context, before time.Time) (
 }
 
 func (f *fakeStore) DeleteApprovalMessage(ctx context.Context, requestID int, guildID string) error {
+	return ctx.Err()
+}
+func (f *fakeStore) ApprovalMessages(ctx context.Context) ([]storage.ApprovalMessage, error) {
+	return nil, ctx.Err()
+}
+func (f *fakeStore) SetApprovalDecision(ctx context.Context, requestID int, guildID, status, reason string) error {
+	return ctx.Err()
+}
+func (f *fakeStore) ClaimDecisionNotification(ctx context.Context, requestID int, discordID, status string) (bool, error) {
+	return true, ctx.Err()
+}
+func (f *fakeStore) ReleaseDecisionNotification(ctx context.Context, requestID int, discordID, status string) error {
+	return ctx.Err()
+}
+func (f *fakeStore) NotificationPreferences(ctx context.Context, discordID string) (storage.NotificationPreferences, error) {
+	if f.notificationPrefs != nil {
+		p := *f.notificationPrefs
+		p.DiscordID = discordID
+		return p, ctx.Err()
+	}
+	return storage.NotificationPreferences{DiscordID: discordID, Approved: true, Declined: true, Available: true}, ctx.Err()
+}
+func (f *fakeStore) SetNotificationPreferences(ctx context.Context, preferences storage.NotificationPreferences) error {
 	return ctx.Err()
 }
 

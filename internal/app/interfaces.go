@@ -19,6 +19,7 @@ type seerClient interface {
 	PendingRequests(ctx context.Context) ([]seer.Request, error)
 	UpdateRequestStatus(ctx context.Context, id int, action string) (seer.Request, error)
 	NotificationSettings(ctx context.Context, userID int) (seer.NotificationSettings, error)
+	RequestsForUser(ctx context.Context, userID, limit int) ([]seer.Request, error)
 }
 
 type stateStore interface {
@@ -35,6 +36,12 @@ type stateStore interface {
 	MarkApprovalMessageDecided(ctx context.Context, requestID int, guildID string, decidedAt time.Time) error
 	DueApprovalMessages(ctx context.Context, before time.Time) ([]storage.ApprovalMessage, error)
 	DeleteApprovalMessage(ctx context.Context, requestID int, guildID string) error
+	ApprovalMessages(ctx context.Context) ([]storage.ApprovalMessage, error)
+	SetApprovalDecision(ctx context.Context, requestID int, guildID, status, reason string) error
+	ClaimDecisionNotification(ctx context.Context, requestID int, discordID, status string) (bool, error)
+	ReleaseDecisionNotification(ctx context.Context, requestID int, discordID, status string) error
+	NotificationPreferences(ctx context.Context, discordID string) (storage.NotificationPreferences, error)
+	SetNotificationPreferences(ctx context.Context, preferences storage.NotificationPreferences) error
 	Ping(ctx context.Context) error
 	Close() error
 }

@@ -389,6 +389,27 @@ func (c *Client) PendingRequests(ctx context.Context) ([]Request, error) {
 	}
 }
 
+// RequestsForUser returns a bounded recent history, including every request origin.
+func (c *Client) RequestsForUser(ctx context.Context, userID, limit int) ([]Request, error) {
+	if userID <= 0 {
+		return nil, errors.New("user ID must be positive")
+	}
+	if limit <= 0 || limit > 25 {
+		limit = 10
+	}
+	values := url.Values{"requestedBy": {strconv.Itoa(userID)}, "sort": {"added"}, "sortDirection": {"desc"}, "take": {strconv.Itoa(limit)}, "skip": {"0"}}
+	var page struct {
+		Results []Request `json:"results"`
+	}
+	if err := c.do(ctx, http.MethodGet, "/api/v1/request?"+values.Encode(), nil, &page); err != nil {
+		return nil, err
+	}
+	if len(page.Results) > limit {
+		page.Results = page.Results[:limit]
+	}
+	return page.Results, nil
+}
+
 func (c *Client) UpdateRequestStatus(ctx context.Context, id int, action string) (Request, error) {
 	if id <= 0 {
 		return Request{}, errors.New("request ID must be positive")

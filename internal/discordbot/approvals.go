@@ -15,6 +15,7 @@ import (
 )
 
 const approvalMessageRetention = 2 * time.Minute
+const componentDeclineModal = "augur:decline-reason:"
 
 func (b *Bot) handleSetup(s interactionSession, i *discordgo.InteractionCreate) {
 	if i.GuildID == "" || !canManageServer(i) {
@@ -132,6 +133,47 @@ func (b *Bot) ReconcileApprovals(ctx context.Context, approvals []seer.ApprovalR
 	if err != nil {
 		return err
 	}
+	// Requests can be decided directly in Seerr; bring persisted cards up to date.
+	known := make(map[int]struct{}, len(approvals))
+	for _, approval := range approvals {
+		known[approval.RequestID] = struct{}{}
+	}
+	if records, err := b.handler.ApprovalMessages(ctx); err == nil {
+		for _, record := range records {
+			if _, pending := known[record.RequestID]; pending || !record.DecidedAt.IsZero() {
+				continue
+			}
+			request, err := b.handler.RequestStatus(ctx, record.RequestID)
+			if err != nil || seer.IsPendingRequest(request.Status) {
+				continue
+			}
+			status := seer.RequestStatusLabel(request.Status)
+			message, err := b.session.ChannelMessage(record.ChannelID, record.MessageID)
+			if err != nil {
+				if discordNotFound(err) {
+					_ = b.handler.DeleteApprovalRecord(ctx, record.RequestID, record.GuildID)
+				}
+				continue
+			}
+			if len(message.Embeds) == 0 {
+				continue
+			}
+			embed := decidedApprovalEmbed(message.Embeds[0], record.RequestID, status, "Seerr")
+			if record.Reason != "" {
+				embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Decline reason", Value: truncate(record.Reason, 1000)})
+			}
+			if _, err := b.session.ChannelMessageEditComplex(&discordgo.MessageEdit{ID: record.MessageID, Channel: record.ChannelID, Embeds: &[]*discordgo.MessageEmbed{embed}, Components: &[]discordgo.MessageComponent{}}); err != nil {
+				if discordNotFound(err) {
+					_ = b.handler.DeleteApprovalRecord(ctx, record.RequestID, record.GuildID)
+				}
+				continue
+			}
+			if request.RequestedBy != nil {
+				b.notifyRequestDecision(ctx, request, embed, status, record.Reason)
+			}
+			_ = b.handler.MarkApprovalDecided(ctx, record.RequestID, record.GuildID, time.Now().UTC())
+		}
+	}
 	for _, approval := range approvals {
 		for _, destination := range destinations {
 			if ctx.Err() != nil {
@@ -205,6 +247,14 @@ func (b *Bot) handleApproval(s interactionSession, i *discordgo.InteractionCreat
 		b.ephemeral(s, i, "That approval button is invalid.")
 		return
 	}
+	if action == "decline" {
+		if i.Message == nil || i.Message.ID == "" || i.ChannelID == "" {
+			b.ephemeral(s, i, "That approval message is no longer available. Please retry from the approval channel.")
+			return
+		}
+		_ = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{Type: discordgo.InteractionResponseModal, Data: &discordgo.InteractionResponseData{CustomID: componentDeclineModal + strconv.Itoa(requestID) + ":" + i.ChannelID + ":" + i.Message.ID, Title: "Decline request", Components: []discordgo.MessageComponent{discordgo.ActionsRow{Components: []discordgo.MessageComponent{discordgo.TextInput{CustomID: "reason", Label: "Reason (optional)", Style: discordgo.TextInputParagraph, Required: false, MaxLength: 500}}}}}})
+		return
+	}
 	if !b.deferComponentUpdate(s, i) {
 		return
 	}
@@ -219,6 +269,65 @@ func (b *Bot) handleApproval(s interactionSession, i *discordgo.InteractionCreat
 	b.finishApprovalInteraction(ctx, s, i, request)
 }
 
+func (b *Bot) handleDeclineModal(s interactionSession, i *discordgo.InteractionCreate) {
+	if i.GuildID == "" || !canManageServer(i) {
+		b.ephemeral(s, i, "You need Manage Server permission to decline requests.")
+		return
+	}
+	customID := i.ModalSubmitData().CustomID
+	value, found := strings.CutPrefix(customID, componentDeclineModal)
+	parts := strings.Split(value, ":")
+	if !found || len(parts) != 3 || !decimalID(parts[1]) || !decimalID(parts[2]) {
+		b.ephemeral(s, i, "That decline form is invalid.")
+		return
+	}
+	id, err := strconv.Atoi(parts[0])
+	if err != nil || id <= 0 {
+		b.ephemeral(s, i, "That decline form is invalid.")
+		return
+	}
+	reason := ""
+	for _, row := range i.ModalSubmitData().Components {
+		if r, ok := row.(discordgo.ActionsRow); ok {
+			for _, c := range r.Components {
+				if input, ok := c.(discordgo.TextInput); ok && input.CustomID == "reason" {
+					reason = strings.TrimSpace(input.Value)
+				}
+			}
+		}
+	}
+	message, fetchErr := b.session.ChannelMessage(parts[1], parts[2])
+	if fetchErr != nil || message == nil || message.ID != parts[2] || message.ChannelID != parts[1] || len(message.Embeds) == 0 {
+		b.ephemeral(s, i, "That approval message is no longer available. Please retry from the approval channel.")
+		return
+	}
+	i.Message = message
+	i.ChannelID = parts[1]
+	if !b.deferInteraction(s, i) {
+		return
+	}
+	ctx, cancel := context.WithTimeout(b.ctx, 30*time.Second)
+	defer cancel()
+	request, err := b.handler.DecideRequest(ctx, id, "decline")
+	if err != nil {
+		b.editContent(s, i, "Seerr could not update this request. Try again.", approvalComponents(id), "restore failed approval")
+		return
+	}
+	b.finishApprovalInteractionWithReason(ctx, s, i, request, reason)
+}
+
+func decimalID(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, r := range value {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
 func approvalRequestID(customID, action string) (int, bool) {
 	prefix := componentApprove
 	if action == "decline" {
@@ -228,27 +337,56 @@ func approvalRequestID(customID, action string) (int, bool) {
 	if !found {
 		return 0, false
 	}
+	if value == "" {
+		return 0, false
+	}
+	if !decimalID(value) {
+		return 0, false
+	}
 	id, err := strconv.Atoi(value)
 	return id, err == nil && id > 0
 }
 
 func (b *Bot) finishApprovalInteraction(ctx context.Context, s interactionSession, i *discordgo.InteractionCreate, request seer.Request) {
-	if len(i.Message.Embeds) == 0 {
+	b.finishApprovalInteractionWithReason(ctx, s, i, request, "")
+}
+func (b *Bot) finishApprovalInteractionWithReason(ctx context.Context, s interactionSession, i *discordgo.InteractionCreate, request seer.Request, reason string) {
+	if i.Message == nil || len(i.Message.Embeds) == 0 {
 		b.logger.Error("approval message has no embed", "request_id", request.ID)
 		return
 	}
 	status := seer.RequestStatusLabel(request.Status)
 	embed := decidedApprovalEmbed(i.Message.Embeds[0], request.ID, status, interactionDisplayName(i))
+	if reason != "" {
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Decline reason", Value: truncate(reason, 1000)})
+	}
 	empty := ""
 	components := []discordgo.MessageComponent{}
-	if _, err := s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{Content: &empty, Embeds: &[]*discordgo.MessageEmbed{embed}, Components: &components, AllowedMentions: noMentions()}); err != nil {
-		b.logger.Error("update approval message", "request_id", request.ID, "error", err)
+	var editErr error
+	if i.Type == discordgo.InteractionModalSubmit && i.Message != nil {
+		_, editErr = b.session.ChannelMessageEditComplex(&discordgo.MessageEdit{ID: i.Message.ID, Channel: i.ChannelID, Content: &empty, Embeds: &[]*discordgo.MessageEmbed{embed}, Components: &components, AllowedMentions: noMentions()})
+	} else if _, err := s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{Content: &empty, Embeds: &[]*discordgo.MessageEmbed{embed}, Components: &components, AllowedMentions: noMentions()}); err != nil {
+		editErr = err
+	}
+	if editErr != nil {
+		b.logger.Error("update approval message", "request_id", request.ID, "error", editErr)
+		if i.Type == discordgo.InteractionModalSubmit {
+			b.editContent(s, i, "Could not update the approval message. Try again.", approvalComponents(request.ID), "restore failed approval")
+		}
+		return
+	}
+	if i.Type == discordgo.InteractionModalSubmit {
+		content := ""
+		if _, err := s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{Content: &content, AllowedMentions: noMentions()}); err != nil {
+			b.logger.Warn("complete decline modal response", "request_id", request.ID, "error", err)
+		}
 	}
 	decidedAt := time.Now().UTC()
 	if err := b.handler.MarkApprovalDecided(ctx, request.ID, i.GuildID, decidedAt); err != nil {
 		b.logger.Error("persist approval decision", "request_id", request.ID, "error", err)
 	}
-	b.notifyRequestDecision(ctx, request, embed, status)
+	_ = b.handler.SetApprovalDecision(ctx, request.ID, i.GuildID, status, reason)
+	b.notifyRequestDecision(ctx, request, embed, status, reason)
 	channelID := i.ChannelID
 	if i.Message.ChannelID != "" {
 		channelID = i.Message.ChannelID
@@ -273,7 +411,7 @@ func decidedApprovalEmbed(source *discordgo.MessageEmbed, requestID int, status,
 	return &embed
 }
 
-func (b *Bot) notifyRequestDecision(ctx context.Context, request seer.Request, source *discordgo.MessageEmbed, status string) {
+func (b *Bot) notifyRequestDecision(ctx context.Context, request seer.Request, source *discordgo.MessageEmbed, status, reason string) {
 	if request.RequestedBy == nil || request.RequestedBy.ID <= 0 {
 		return
 	}
@@ -292,22 +430,50 @@ func (b *Bot) notifyRequestDecision(ctx context.Context, request seer.Request, s
 			continue
 		}
 		seen[discordID] = struct{}{}
-		b.sendDecisionDM(discordID, request.ID, decisionEmbed(source, status))
+		prefs, err := b.handler.NotificationPreferences(ctx, discordID)
+		if err != nil {
+			continue
+		}
+		if !decisionNotificationEnabled(status, prefs) {
+			continue
+		}
+		claimed, err := b.handler.ClaimDecisionNotification(ctx, request.ID, discordID, status)
+		if err != nil || !claimed {
+			continue
+		}
+		if err := b.sendDecisionDM(discordID, request.ID, decisionEmbed(source, status, reason)); err != nil {
+			if releaseErr := b.handler.ReleaseDecisionNotification(ctx, request.ID, discordID, status); releaseErr != nil {
+				b.logger.Warn("release failed decision notification claim", "request_id", request.ID, "error", releaseErr)
+			}
+		}
 	}
 }
 
-func (b *Bot) sendDecisionDM(discordID string, requestID int, embed *discordgo.MessageEmbed) {
+func decisionNotificationEnabled(status string, prefs storage.NotificationPreferences) bool {
+	switch status {
+	case "Approved":
+		return prefs.Approved
+	case "Declined":
+		return prefs.Declined
+	default:
+		return false
+	}
+}
+
+func (b *Bot) sendDecisionDM(discordID string, requestID int, embed *discordgo.MessageEmbed) error {
 	channel, err := b.session.UserChannelCreate(discordID)
 	if err != nil {
 		b.logger.Warn("open requester DM", "request_id", requestID, "error", err)
-		return
+		return err
 	}
 	if _, err := b.session.ChannelMessageSendComplex(channel.ID, &discordgo.MessageSend{Embeds: []*discordgo.MessageEmbed{embed}, AllowedMentions: noMentions()}); err != nil {
 		b.logger.Warn("send request decision DM", "request_id", requestID, "error", err)
+		return err
 	}
+	return nil
 }
 
-func decisionEmbed(source *discordgo.MessageEmbed, status string) *discordgo.MessageEmbed {
+func decisionEmbed(source *discordgo.MessageEmbed, status string, reasons ...string) *discordgo.MessageEmbed {
 	embed := &discordgo.MessageEmbed{Title: "Your request was " + strings.ToLower(status), Color: 0x57F287}
 	if status == "Declined" {
 		embed.Color = 0xED4245
@@ -318,6 +484,13 @@ func decisionEmbed(source *discordgo.MessageEmbed, status string) *discordgo.Mes
 		embed.Thumbnail = source.Thumbnail
 	}
 	embed.Footer = &discordgo.MessageEmbedFooter{Text: "Status: " + status}
+	reason := ""
+	if len(reasons) > 0 {
+		reason = reasons[0]
+	}
+	if strings.TrimSpace(reason) != "" {
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Decline reason", Value: truncate(reason, 1000)})
+	}
 	return embed
 }
 

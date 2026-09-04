@@ -2,12 +2,14 @@ package discordbot
 
 import (
 	"log/slog"
+	"strings"
 	"testing"
 
 	"github.com/bwmarrin/discordgo"
 
 	"github.com/mayvqt/Augur/internal/config"
 	"github.com/mayvqt/Augur/internal/seer"
+	"github.com/mayvqt/Augur/internal/storage"
 )
 
 func TestCompletionEmbedIncludesMediaMetadata(t *testing.T) {
@@ -216,6 +218,10 @@ func TestDecisionEmbedIsHumanReadable(t *testing.T) {
 	if declined.Color != 0xED4245 {
 		t.Fatalf("declined color = %#x", declined.Color)
 	}
+	withReason := decisionEmbed(source, "Declined", "Not a priority")
+	if len(withReason.Fields) != 1 || withReason.Fields[0].Value != "Not a priority" {
+		t.Fatalf("decline reason = %#v", withReason.Fields)
+	}
 }
 
 func TestApprovalRequestIDRejectsWrongActionsAndMalformedIDs(t *testing.T) {
@@ -227,6 +233,35 @@ func TestApprovalRequestIDRejectsWrongActionsAndMalformedIDs(t *testing.T) {
 		if _, ok := approvalRequestID(value, "approve"); ok {
 			t.Fatalf("approvalRequestID accepted %q", value)
 		}
+	}
+	for _, value := range []string{"augur:approve:+42", "augur:approve:42 ", "augur:approve:42:extra"} {
+		if _, ok := approvalRequestID(value, "approve"); ok {
+			t.Fatalf("approvalRequestID accepted %q", value)
+		}
+	}
+}
+
+func TestFormatRequestLinesIncludesDetailsAndBoundsOutput(t *testing.T) {
+	requests := []seer.Request{{ID: 7, Status: "approved", MediaInfo: &seer.Media{Status: "available"}}}
+	got := formatRequestLines(requests, map[int]string{7: "Arrival (2016)"})
+	if !strings.Contains(got, "Arrival (2016)") || !strings.Contains(got, "Approved") || !strings.Contains(got, "Available") {
+		t.Fatalf("formatted request = %q", got)
+	}
+	for i := 1; i <= 30; i++ {
+		requests = append(requests, seer.Request{ID: i, Status: 1})
+	}
+	got = formatRequestLines(requests, map[int]string{})
+	if len(got) > 1900 {
+		t.Fatalf("formatted requests length = %d", len(got))
+	}
+}
+
+func TestDecisionNotificationPreferencesSuppressMatchingStatus(t *testing.T) {
+	if decisionNotificationEnabled("Approved", storage.NotificationPreferences{Approved: false, Declined: true}) {
+		t.Fatal("approved notification was enabled")
+	}
+	if !decisionNotificationEnabled("Declined", storage.NotificationPreferences{Declined: true}) {
+		t.Fatal("declined notification was suppressed")
 	}
 }
 

@@ -29,6 +29,15 @@ type Handler interface {
 	DeleteApprovalRecord(ctx context.Context, requestID int, guildID string) error
 	DecideRequest(ctx context.Context, requestID int, action string) (seer.Request, error)
 	RequesterDiscordIDs(ctx context.Context, userID int) ([]string, error)
+	RequestsForUser(ctx context.Context, discordID string, limit int) ([]seer.Request, error)
+	NotificationPreferences(ctx context.Context, discordID string) (storage.NotificationPreferences, error)
+	SetNotificationPreferences(ctx context.Context, preferences storage.NotificationPreferences) error
+	SetApprovalDecision(ctx context.Context, requestID int, guildID, status, reason string) error
+	ClaimDecisionNotification(ctx context.Context, requestID int, discordID, status string) (bool, error)
+	ReleaseDecisionNotification(ctx context.Context, requestID int, discordID, status string) error
+	ApprovalMessages(ctx context.Context) ([]storage.ApprovalMessage, error)
+	RequestStatus(ctx context.Context, requestID int) (seer.Request, error)
+	MediaDetails(ctx context.Context, mediaType string, mediaID int) (seer.SearchResult, error)
 }
 
 type interactionSession interface {
