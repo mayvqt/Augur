@@ -46,13 +46,15 @@ type interactionSession interface {
 }
 
 type Bot struct {
-	session *discordgo.Session
-	cfg     config.DiscordConfig
-	link    config.LinkConfig
-	handler Handler
-	logger  *slog.Logger
-	ctx     context.Context
-	cache   selectionCache
+	session                *discordgo.Session
+	cfg                    config.DiscordConfig
+	link                   config.LinkConfig
+	handler                Handler
+	logger                 *slog.Logger
+	ctx                    context.Context
+	cache                  selectionCache
+	sendApprovalMessage    func(string, *discordgo.MessageSend) (*discordgo.Message, error)
+	cleanupApprovalMessage func(string, string) error
 }
 
 func New(cfg config.DiscordConfig, link config.LinkConfig, handler Handler, logger *slog.Logger) (*Bot, error) {
@@ -67,6 +69,12 @@ func New(cfg config.DiscordConfig, link config.LinkConfig, handler Handler, logg
 		return nil, err
 	}
 	bot := &Bot{session: session, cfg: cfg, link: link, handler: handler, logger: logger, ctx: context.Background()}
+	bot.sendApprovalMessage = func(channelID string, data *discordgo.MessageSend) (*discordgo.Message, error) {
+		return session.ChannelMessageSendComplex(channelID, data)
+	}
+	bot.cleanupApprovalMessage = func(channelID, messageID string) error {
+		return session.ChannelMessageDelete(channelID, messageID)
+	}
 	session.AddHandler(bot.onReady)
 	session.AddHandler(bot.onInteraction)
 	return bot, nil

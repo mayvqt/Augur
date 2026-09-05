@@ -1,6 +1,8 @@
 package discordbot
 
 import (
+	"context"
+	"errors"
 	"log/slog"
 	"strings"
 	"testing"
@@ -11,6 +13,52 @@ import (
 	"github.com/mayvqt/Augur/internal/seer"
 	"github.com/mayvqt/Augur/internal/storage"
 )
+
+type fakeApprovalHandler struct {
+	Handler
+	claimed  bool
+	finished bool
+	released bool
+}
+
+func (f *fakeApprovalHandler) ClaimApproval(context.Context, int, string, string) (bool, error) {
+	f.claimed = true
+	return true, nil
+}
+
+func (f *fakeApprovalHandler) FinishApproval(context.Context, int, string, string, string) error {
+	f.finished = true
+	return errors.New("finish failed")
+}
+
+func (f *fakeApprovalHandler) ReleaseApproval(context.Context, int, string) error {
+	f.released = true
+	return nil
+}
+
+func TestSendApprovalCleansUpWhenFinishFails(t *testing.T) {
+	t.Parallel()
+	handler := &fakeApprovalHandler{}
+	deleted := false
+	bot := &Bot{
+		handler: handler,
+		logger:  slog.Default(),
+		ctx:     context.Background(),
+		sendApprovalMessage: func(string, *discordgo.MessageSend) (*discordgo.Message, error) {
+			return &discordgo.Message{ID: "message-1"}, nil
+		},
+		cleanupApprovalMessage: func(channelID, messageID string) error {
+			deleted = channelID == "channel-1" && messageID == "message-1"
+			return nil
+		},
+	}
+
+	bot.sendApproval(context.Background(), storage.ApprovalSettings{GuildID: "guild-1", ChannelID: "channel-1"}, seer.ApprovalRequest{RequestID: 42, Media: seer.SearchResult{Title: "Arrival"}}, false)
+
+	if !handler.claimed || !handler.finished || !deleted || !handler.released {
+		t.Fatalf("claim=%t finish=%t deleted=%t released=%t, want all true", handler.claimed, handler.finished, deleted, handler.released)
+	}
+}
 
 func TestCompletionEmbedIncludesMediaMetadata(t *testing.T) {
 	t.Parallel()

@@ -198,7 +198,13 @@ func (b *Bot) sendApproval(ctx context.Context, destination storage.ApprovalSett
 		}
 	}
 	embed := b.approvalEmbed(approval)
-	message, err := b.session.ChannelMessageSendComplex(destination.ChannelID, &discordgo.MessageSend{
+	sendMessage := b.sendApprovalMessage
+	if sendMessage == nil {
+		sendMessage = func(channelID string, data *discordgo.MessageSend) (*discordgo.Message, error) {
+			return b.session.ChannelMessageSendComplex(channelID, data)
+		}
+	}
+	message, err := sendMessage(destination.ChannelID, &discordgo.MessageSend{
 		Embeds: []*discordgo.MessageEmbed{embed}, Components: approvalComponents(approval.RequestID), AllowedMentions: noMentions(),
 	})
 	if err != nil {
@@ -208,6 +214,18 @@ func (b *Bot) sendApproval(ctx context.Context, destination storage.ApprovalSett
 	}
 	if err := b.handler.FinishApproval(ctx, approval.RequestID, destination.GuildID, destination.ChannelID, message.ID); err != nil {
 		b.logger.Error("save approval message", "request_id", approval.RequestID, "error", err)
+		deleteMessage := b.cleanupApprovalMessage
+		if deleteMessage == nil {
+			deleteMessage = func(channelID, messageID string) error {
+				return b.session.ChannelMessageDelete(channelID, messageID)
+			}
+		}
+		if cleanupErr := deleteMessage(destination.ChannelID, message.ID); cleanupErr != nil {
+			b.logger.Error("delete untracked approval message", "request_id", approval.RequestID, "channel_id", destination.ChannelID, "message_id", message.ID, "error", cleanupErr)
+		}
+		if releaseErr := b.handler.ReleaseApproval(ctx, approval.RequestID, destination.GuildID); releaseErr != nil {
+			b.logger.Error("release approval claim", "request_id", approval.RequestID, "guild_id", destination.GuildID, "error", releaseErr)
+		}
 	}
 }
 
