@@ -35,4 +35,20 @@ Channel, Send Messages, Embed Links, and Manage Messages permissions in the sele
 `AUGUR_DISCORD_TOKEN_FILE` and `AUGUR_SEERR_API_KEY_FILE` can read secrets from mounted files. Do not set both forms of
 the same secret. Keep secrets out of version control; prefer files in containers.
 
-The optional server provides `/healthz`, `/readyz`, and `/metrics`. It has no authentication; keep it private.
+For Docker, `AUGUR_SEERR_BASE_URL` must resolve from inside the Augur container. A Compose service name such as
+`http://seerr:5055` is valid only when Seerr is on the same Docker network. If Seerr runs elsewhere, use a reachable LAN
+hostname or IP (for example `http://192.168.1.20:5055`). The public URL can be a different browser-facing address.
+
+For file-based secrets, mount read-only files and point the variables at them, for example:
+
+```yaml
+environment:
+  AUGUR_DISCORD_TOKEN_FILE: /run/secrets/discord-token
+  AUGUR_SEERR_API_KEY_FILE: /run/secrets/seerr-api-key
+```
+
+Keep `.env`, secret files, and `data/` private. Back up the SQLite database in `data/` regularly and protect backups with
+the same care as the API credentials; do not commit or publish them.
+
+The optional server provides `/healthz`, `/readyz`, and `/metrics`. It has no authentication, so bind it to a private
+interface or firewall it from the public internet.
