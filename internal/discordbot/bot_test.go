@@ -304,6 +304,18 @@ func TestFormatRequestLinesIncludesDetailsAndBoundsOutput(t *testing.T) {
 	}
 }
 
+func TestFormatRequestLinesIncludesTerminalStatus(t *testing.T) {
+	t.Parallel()
+	requests := []seer.Request{
+		{ID: 5, Status: 5, MediaInfo: &seer.Media{Status: 5}},
+		{ID: 4, Status: 4, MediaInfo: &seer.Media{Status: 5}},
+	}
+	got := formatRequestLines(requests, map[int]string{5: "Completed film", 4: "Failed film"})
+	if !strings.Contains(got, "Completed · Available") || !strings.Contains(got, "Failed · Available") {
+		t.Fatalf("formatted terminal requests = %q", got)
+	}
+}
+
 func TestDecisionNotificationPreferencesSuppressMatchingStatus(t *testing.T) {
 	if decisionNotificationEnabled("Approved", storage.NotificationPreferences{Approved: false, Declined: true}) {
 		t.Fatal("approved notification was enabled")

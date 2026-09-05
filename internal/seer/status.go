@@ -38,6 +38,10 @@ func RequestStatusLabel(status any) string {
 		return "Approved"
 	case 3:
 		return "Declined"
+	case 4:
+		return "Failed"
+	case 5:
+		return "Completed"
 	default:
 		return "Unknown"
 	}
@@ -52,6 +56,10 @@ func requestStatusCode(status any) int64 {
 			return 2
 		case "declined", "decline":
 			return 3
+		case "failed":
+			return 4
+		case "completed":
+			return 5
 		}
 	}
 	return mediaStatusCode(status)

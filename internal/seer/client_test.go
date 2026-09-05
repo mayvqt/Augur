@@ -53,6 +53,35 @@ func TestAvailabilityLabel(t *testing.T) {
 	}
 }
 
+func TestRequestStatusLabel(t *testing.T) {
+	t.Parallel()
+	tests := map[string]struct {
+		status any
+		label  string
+	}{
+		"numeric float":      {status: float64(5), label: "Completed"},
+		"json number":        {status: json.Number("4"), label: "Failed"},
+		"numeric string":     {status: "5", label: "Completed"},
+		"symbolic failed":    {status: "  FaIlEd ", label: "Failed"},
+		"symbolic completed": {status: " COMPLETED ", label: "Completed"},
+		"unknown":            {status: "some-new-state", label: "Unknown"},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			if got := RequestStatusLabel(tt.status); got != tt.label {
+				t.Fatalf("RequestStatusLabel(%v) = %q, want %q", tt.status, got, tt.label)
+			}
+		})
+	}
+
+	for _, status := range []any{4, float64(5), json.Number("5"), "completed", "failed"} {
+		if IsPendingRequest(status) {
+			t.Fatalf("IsPendingRequest(%v) = true, want false", status)
+		}
+	}
+}
+
 func TestFindUserByDiscordIDUsesNotificationSettings(t *testing.T) {
 	t.Parallel()
 	client := newTestClient(t)
