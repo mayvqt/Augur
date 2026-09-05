@@ -5,7 +5,7 @@ import "github.com/bwmarrin/discordgo"
 const (
 	commandLink          = "link"
 	commandRequest       = "request"
-	commandSetup         = "setup"
+	commandApprovals     = "approvals"
 	commandRequests      = "requests"
 	commandNotifications = "notifications"
 	componentPick        = "augur:pick:"
@@ -41,11 +41,12 @@ func slashCommands() []*discordgo.ApplicationCommand {
 			}},
 		},
 		{
-			Name: commandSetup, Description: "Configure Augur for this server.", DMPermission: boolPtr(false),
+			Name: commandApprovals, Description: "Configure approval messages.", DMPermission: boolPtr(false),
 			DefaultMemberPermissions: permissionPtr(discordgo.PermissionManageGuild),
 			Options: []*discordgo.ApplicationCommandOption{
-				{Type: discordgo.ApplicationCommandOptionBoolean, Name: "enabled", Description: "Enable or disable approval messages (omit to show current settings)"},
-				{Type: discordgo.ApplicationCommandOptionChannel, Name: "channel", Description: "Channel for approval messages", ChannelTypes: []discordgo.ChannelType{discordgo.ChannelTypeGuildText}},
+				{Type: discordgo.ApplicationCommandOptionSubCommand, Name: "status", Description: "Show the current approval-message setting"},
+				{Type: discordgo.ApplicationCommandOptionSubCommand, Name: "enable", Description: "Enable approval messages", Options: []*discordgo.ApplicationCommandOption{{Type: discordgo.ApplicationCommandOptionChannel, Name: "channel", Description: "Channel for approval messages", Required: true, ChannelTypes: []discordgo.ChannelType{discordgo.ChannelTypeGuildText}}}},
+				{Type: discordgo.ApplicationCommandOptionSubCommand, Name: "disable", Description: "Disable approval messages"},
 			},
 		},
 	}

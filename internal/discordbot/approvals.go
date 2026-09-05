@@ -17,13 +17,13 @@ import (
 const approvalMessageRetention = 2 * time.Minute
 const componentDeclineModal = "augur:decline-reason:"
 
-func (b *Bot) handleSetup(s interactionSession, i *discordgo.InteractionCreate) {
+func (b *Bot) handleApprovals(s interactionSession, i *discordgo.InteractionCreate) {
 	if i.GuildID == "" || !canManageServer(i) {
 		b.ephemeral(s, i, "You need Manage Server permission to configure approval messages.")
 		return
 	}
-	enabled, enabledSet, channelID := setupOptions(i)
-	if !enabledSet {
+	subcommand, channelID := approvalsOptions(i)
+	if subcommand == "status" {
 		channelID, currentEnabled, err := b.handler.ApprovalChannel(b.ctx, i.GuildID)
 		if err != nil {
 			b.logger.Error("load approval settings", "guild_id", i.GuildID, "error", err)
@@ -37,6 +37,7 @@ func (b *Bot) handleSetup(s interactionSession, i *discordgo.InteractionCreate) 
 		b.ephemeral(s, i, "Approval messages are disabled for this server.")
 		return
 	}
+	enabled := subcommand == "enable"
 	if enabled && channelID == "" {
 		b.ephemeral(s, i, "Choose a channel when enabling approval messages.")
 		return
@@ -67,17 +68,18 @@ func (b *Bot) handleSetup(s interactionSession, i *discordgo.InteractionCreate) 
 	b.ephemeral(s, i, "Approval messages are disabled for this server.")
 }
 
-func setupOptions(i *discordgo.InteractionCreate) (enabled bool, enabledSet bool, channelID string) {
-	for _, option := range i.ApplicationCommandData().Options {
-		switch option.Name {
-		case "enabled":
-			enabled = option.BoolValue()
-			enabledSet = true
-		case "channel":
+func approvalsOptions(i *discordgo.InteractionCreate) (subcommand, channelID string) {
+	options := i.ApplicationCommandData().Options
+	if len(options) == 0 {
+		return "", ""
+	}
+	subcommand = options[0].Name
+	for _, option := range options[0].Options {
+		if option.Name == "channel" {
 			channelID, _ = option.Value.(string)
 		}
 	}
-	return enabled, enabledSet, channelID
+	return subcommand, channelID
 }
 
 func missingApprovalPermissions(permissions int64) []string {

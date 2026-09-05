@@ -13,8 +13,8 @@ docker compose up -d
 ```
 
 Use `/link` to connect a Discord account and `/request` to request media. A server administrator can run
-`/setup enabled:true channel:#approvals` to post pending requests with Approve and Decline buttons, or
-`/setup enabled:false` to turn those messages off. State is stored in `./data`.
+`/approvals enable channel:#approvals` to post pending requests with Approve and Decline buttons, or
+`/approvals disable` to turn those messages off. Use `/approvals status` to inspect the current setting. State is stored in `./data`.
 
 Approval cards cover all Seerr request sources, notify linked requesters of the decision, and are removed two minutes
 after approval or decline.

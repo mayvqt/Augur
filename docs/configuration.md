@@ -28,8 +28,8 @@ The JSON file also controls settings that do not currently have environment-vari
 - `discord.presence.message`: presence text shown in Discord
 - `seer.timeout`: timeout for Seerr API calls (`15s` by default)
 
-Server administrators can run `/setup` with no options to inspect the current approval-message setting. Use
-`/setup enabled:true channel:#approvals` to enable it or `/setup enabled:false` to disable it. The bot needs View
+Server administrators can run `/approvals status` to inspect the current approval-message setting. Use
+`/approvals enable channel:#approvals` to enable it or `/approvals disable` to disable it. The bot needs View
 Channel, Send Messages, Embed Links, and Manage Messages permissions in the selected channel.
 
 `AUGUR_DISCORD_TOKEN_FILE` and `AUGUR_SEERR_API_KEY_FILE` can read secrets from mounted files. Do not set both forms of

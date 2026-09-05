@@ -265,12 +265,24 @@ func TestDecisionNotificationPreferencesSuppressMatchingStatus(t *testing.T) {
 	}
 }
 
-func TestSetupCommandCanShowCurrentSettings(t *testing.T) {
+func TestApprovalsCommandHasExplicitSubcommands(t *testing.T) {
 	t.Parallel()
-	commands := slashCommands()
-	setup := commands[len(commands)-1]
-	if setup.Name != commandSetup || setup.Options[0].Required {
-		t.Fatalf("setup command = %#v, want optional enabled setting", setup)
+	var approvals *discordgo.ApplicationCommand
+	for _, command := range slashCommands() {
+		if command.Name == commandApprovals {
+			approvals = command
+		}
+	}
+	if approvals == nil || len(approvals.Options) != 3 {
+		t.Fatalf("approvals command = %#v, want three subcommands", approvals)
+	}
+	for n, name := range []string{"status", "enable", "disable"} {
+		if approvals.Options[n].Name != name || approvals.Options[n].Type != discordgo.ApplicationCommandOptionSubCommand {
+			t.Fatalf("approvals option %d = %#v, want %s subcommand", n, approvals.Options[n], name)
+		}
+	}
+	if len(approvals.Options[1].Options) != 1 || !approvals.Options[1].Options[0].Required {
+		t.Fatalf("enable options = %#v, want required channel", approvals.Options[1].Options)
 	}
 }
 

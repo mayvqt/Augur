@@ -30,8 +30,8 @@ func (b *Bot) handleCommand(s interactionSession, i *discordgo.InteractionCreate
 		b.handleNotifications(s, i)
 	case commandRequest:
 		b.handleRequest(s, i)
-	case commandSetup:
-		b.handleSetup(s, i)
+	case commandApprovals:
+		b.handleApprovals(s, i)
 	}
 }
 
