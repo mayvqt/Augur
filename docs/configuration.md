@@ -1,17 +1,20 @@
 # Configuration
 
 Environment variables override `config.json`. Use `AUGUR_CONFIG` or `-config` to select another file.
+The container creates `/data/config.json` from the example on first startup and
+keeps it across restarts. When running the binary directly, create the file from
+[`config.example.json`](../config.example.json) first.
 
-Required:
+## Required settings
 
 - `AUGUR_DISCORD_TOKEN`
 - `AUGUR_SEERR_API_KEY`
 - `AUGUR_SEERR_BASE_URL`: URL reachable by Augur
 - `AUGUR_SEERR_PUBLIC_URL`: URL opened by users
 
-Optional:
+## Optional settings
 
-- `AUGUR_GUILD_ID`: empty
+- `AUGUR_GUILD_ID`: empty for global commands, or a Discord server ID for commands in that server
 - `AUGUR_LINK_REQUIRE_MATCH`: `true`
 - `AUGUR_STORAGE_PATH`: `/data/augur-state.db` in Docker
 - `AUGUR_WORKER_POLL_INTERVAL`: `2m`
@@ -19,6 +22,14 @@ Optional:
 - `AUGUR_HEALTH_ADDRESS`: `127.0.0.1:0`
 
 See [`config.example.json`](../config.example.json) for the complete format.
+
+Keep `AUGUR_LINK_REQUIRE_MATCH=true` for requests to use each person's Seerr
+account. Setting it to `false` submits requests using the API key's identity
+instead; it does not remove the linking requirement for `/requests`.
+
+Containers also accept `PUID` and `PGID` (defaults `99` and `100`) for the user
+and group that run Augur and own its persistent files. Both must be nonzero
+numeric IDs.
 
 The JSON file also controls settings that do not currently have environment-variable overrides:
 
@@ -28,9 +39,9 @@ The JSON file also controls settings that do not currently have environment-vari
 - `discord.presence.message`: presence text shown in Discord
 - `seer.timeout`: timeout for Seerr API calls (`15s` by default)
 
-Server administrators can run `/approvals status` to inspect the current approval-message setting. Use
-`/approvals enable channel:#approvals` to enable it or `/approvals disable` to disable it. The bot needs View
-Channel, Send Messages, Embed Links, and Manage Messages permissions in the selected channel.
+For approval setup and permission requirements, see [approval cards](features.md#approval-cards).
+
+## Secrets and network access
 
 `AUGUR_DISCORD_TOKEN_FILE` and `AUGUR_SEERR_API_KEY_FILE` can read secrets from mounted files. Do not set both forms of
 the same secret. Keep secrets out of version control; prefer files in containers.
