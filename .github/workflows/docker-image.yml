@@ -21,28 +21,8 @@ concurrency:
 
 jobs:
   test:
-    name: Go Test
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: Set up Go
-        uses: actions/setup-go@v7
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: Run tests
-        run: go test ./...
-
-      - name: Run vet
-        run: go vet ./...
-
-      - name: Run race detector
-        run: go test -race ./...
+    name: Release checks
+    uses: ./.github/workflows/ci.yml
 
   publish:
     name: Build And Publish

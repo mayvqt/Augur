@@ -11,13 +11,13 @@ for ID_VALUE in "$PUID" "$PGID"; do
       echo "PUID and PGID must be numeric" >&2
       exit 1
       ;;
+    *[1-9]*) ;;
+    *)
+      echo "PUID and PGID must be greater than zero" >&2
+      exit 1
+      ;;
   esac
 done
-
-if [ "$PUID" = "0" ] || [ "$PGID" = "0" ]; then
-  echo "PUID and PGID must be greater than zero" >&2
-  exit 1
-fi
 
 if [ "$(id -u)" = "0" ]; then
   CURRENT_GID="$(getent group augur | cut -d: -f3)"

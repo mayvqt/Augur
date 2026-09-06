@@ -1,6 +1,7 @@
 name: CI
 
 on:
+  workflow_call:
   pull_request:
   push:
     branches:
@@ -110,7 +111,11 @@ jobs:
             sh -c 'test "$(id -u)" = 1234 && test "$(id -g)" = 1235 && test -f /data/config.json && touch /data/entrypoint-ok'
           test "$(stat -c '%u:%g' "$data_dir/entrypoint-ok")" = "1234:1235"
           test "$(stat -c '%u:%g' "$data_dir/config.json")" = "1234:1235"
-          if docker run --rm -e PUID=0 augur:ci true; then
-            echo "entrypoint unexpectedly allowed PUID=0"
-            exit 1
-          fi
+          for variable in PUID PGID; do
+            for value in 0 00 000 -1 invalid; do
+              if docker run --rm -e "$variable=$value" augur:ci true; then
+                echo "entrypoint unexpectedly allowed $variable=$value"
+                exit 1
+              fi
+            done
+          done
