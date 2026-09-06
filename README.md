@@ -1,5 +1,7 @@
 # Augur
 
+## Overview
+
 Discord bot for requesting movies and TV shows through [Seerr](https://github.com/seerr-team/seerr).
 
 ## Quick start
@@ -47,6 +49,18 @@ See [commands and approval permissions](docs/features.md) before enabling approv
 
 ## Documentation
 
-[Configuration](docs/configuration.md) · [Features](docs/features.md) · [Unraid](docs/unraid.md) ·
-[Releases](docs/releases.md) · [Security](SECURITY.md) · [Development](docs/development.md) · [License](LICENSE) ·
-[Issues](https://github.com/mayvqt/Augur/issues)
+- [Configuration](docs/configuration.md)
+- [Features](docs/features.md)
+- [Unraid](docs/unraid.md)
+- [Releases](docs/releases.md)
+- [Security](SECURITY.md)
+- [Development](docs/development.md)
+- [License](LICENSE)
+- [Issues](https://github.com/mayvqt/Augur/issues)
+
+## Related projects
+
+These are separate deployments in the same media-server and Seerr ecosystem:
+
+- [Veyra](https://github.com/mayvqt/Veyra) — a self-hosted Jellyfin or Emby portal with Seerr requests and Arr data.
+- [Aperture](https://github.com/mayvqt/Aperture) — controlled invite links and account provisioning for Jellyfin or Emby.
