@@ -25,19 +25,20 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Set up Go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version-file: go.mod
           cache: true
 
       - name: Check Go formatting
         run: |
-          unformatted="$(gofmt -l ./cmd ./internal)"
+          unformatted="$(git ls-files -z -- '*.go' | xargs -0 -r gofmt -l)"
           if [ -n "$unformatted" ]; then
             echo "Go files need gofmt:"
             echo "$unformatted"
@@ -48,13 +49,31 @@ jobs:
         run: go mod tidy -diff
 
       - name: Check diff whitespace
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_BEFORE: ${{ github.event.before }}
+          EVENT_SHA: ${{ github.sha }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            git diff --check "${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}"
-          elif [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]; then
-            git diff --check "${{ github.event.before }}..${{ github.sha }}"
+          zero_sha=0000000000000000000000000000000000000000
+          if [ "$EVENT_NAME" = "pull_request" ] \
+            && [ -n "$PR_BASE_SHA" ] \
+            && [ -n "$PR_HEAD_SHA" ] \
+            && git cat-file -e "${PR_BASE_SHA}^{commit}" 2>/dev/null \
+            && git cat-file -e "${PR_HEAD_SHA}^{commit}" 2>/dev/null; then
+            git diff --check "$PR_BASE_SHA..$PR_HEAD_SHA"
+          elif [ -n "$EVENT_BEFORE" ] \
+            && [ "$EVENT_BEFORE" != "$zero_sha" ] \
+            && [ -n "$EVENT_SHA" ] \
+            && git cat-file -e "${EVENT_BEFORE}^{commit}" 2>/dev/null \
+            && git cat-file -e "${EVENT_SHA}^{commit}" 2>/dev/null; then
+            git diff --check "$EVENT_BEFORE..$EVENT_SHA"
+          elif [ -n "$EVENT_SHA" ] && git cat-file -e "${EVENT_SHA}^{commit}" 2>/dev/null; then
+            git diff-tree --check --root -r "$EVENT_SHA"
           else
-            git diff-tree --check --root -r "${{ github.sha }}"
+            echo "Unable to resolve commit for whitespace check"
+            exit 1
           fi
 
       - name: Run tests
@@ -67,10 +86,10 @@ jobs:
         run: go test -race ./...
 
       - name: Run static analysis
-        run: go run honnef.co/go/tools/cmd/staticcheck@latest ./...
+        run: go run honnef.co/go/tools/cmd/staticcheck@v0.8.1 ./...
 
       - name: Scan dependencies for vulnerabilities
-        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 ./...
 
       - name: Build binary
         run: CGO_ENABLED=0 go build -trimpath -o /tmp/augur ./cmd/augur
@@ -83,13 +102,15 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4
 
       - name: Build image
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
         with:
           context: .
           push: false

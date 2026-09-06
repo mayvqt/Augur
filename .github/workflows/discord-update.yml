@@ -44,10 +44,11 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          persist-credentials: false
 
       - name: Build announcement
         id: announcement
@@ -129,14 +130,27 @@ jobs:
             changes="General fixes and improvements."
           fi
 
-          {
-            echo "version=$version"
-            echo "title=$title"
-            echo "summary=$summary"
-            echo "changes<<AUGUR_CHANGES"
-            echo "$changes"
-            echo "AUGUR_CHANGES"
-          } >> "$GITHUB_OUTPUT"
+          write_output() {
+            local name="$1"
+            local value="$2"
+            local delimiter
+            while :; do
+              delimiter="ghadelimiter_$(openssl rand -hex 16)"
+              case "$value" in
+                *"$delimiter"*) ;;
+                *) break ;;
+              esac
+            done
+            {
+              printf '%s<<%s\n' "$name" "$delimiter"
+              printf '%s\n' "$value"
+              printf '%s\n' "$delimiter"
+            } >> "$GITHUB_OUTPUT"
+          }
+          write_output version "$version"
+          write_output title "$title"
+          write_output summary "$summary"
+          write_output changes "$changes"
 
       - name: Skip when webhook is missing
         if: env.DISCORD_WEBHOOK_URL == ''
@@ -191,6 +205,6 @@ jobs:
             body: JSON.stringify(payload)
           });
           if (!response.ok) {
-            throw new Error(`Discord webhook failed with HTTP ${response.status}: ${await response.text()}`);
+            throw new Error(`Discord webhook failed with HTTP ${response.status}`);
           }
           NODE

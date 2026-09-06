@@ -5,6 +5,8 @@ tag is published. Pin production deployments to a published semver tag; use `lat
 
 ## Unreleased
 
+- Standardize project documentation and harden release automation.
+
 - Reject zero-padded root user/group IDs in container configuration.
 - Clarify setup, account linking, approval permissions, and backup procedures.
 
