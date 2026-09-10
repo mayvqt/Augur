@@ -7,6 +7,7 @@ tag is published. Pin production deployments to a published semver tag; use `lat
 
 - Standardize project documentation and harden release automation.
 
+- Refuse to open database state created by a newer Augur version.
 - Reject zero-padded root user/group IDs in container configuration.
 - Clarify setup, account linking, approval permissions, and backup procedures.
 
