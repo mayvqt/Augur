@@ -55,6 +55,8 @@ type NotificationPreferences struct {
 
 const subscriptionColumnList = "request_id, discord_id, title, media_type, overview, poster_path, release_year, language, rating, created_at, completed_at"
 
+const currentMigrationVersion = 5
+
 func Open(path string) (*Store, error) {
 	dbPath, err := storagePath(path)
 	if err != nil {
@@ -448,6 +450,13 @@ func (s *Store) initialize(ctx context.Context) error {
 	if _, err := s.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)`); err != nil {
 		return fmt.Errorf("create schema ledger: %w", err)
 	}
+	var latestVersion sql.NullInt64
+	if err := s.db.QueryRowContext(ctx, `SELECT max(version) FROM schema_migrations`).Scan(&latestVersion); err != nil {
+		return fmt.Errorf("inspect schema version: %w", err)
+	}
+	if latestVersion.Valid && latestVersion.Int64 > currentMigrationVersion {
+		return fmt.Errorf("storage schema version %d is newer than supported version %d", latestVersion.Int64, currentMigrationVersion)
+	}
 	var migrationCount int
 	if err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM schema_migrations`).Scan(&migrationCount); err != nil {
 		return fmt.Errorf("inspect schema ledger: %w", err)
@@ -463,7 +472,7 @@ func (s *Store) initialize(ctx context.Context) error {
 			}
 		}
 	}
-	for version := 1; version <= 5; version++ {
+	for version := 1; version <= currentMigrationVersion; version++ {
 		var applied int
 		if err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM schema_migrations WHERE version = ?`, version).Scan(&applied); err != nil {
 			return fmt.Errorf("inspect migration %d: %w", version, err)

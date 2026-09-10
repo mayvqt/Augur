@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -34,13 +35,42 @@ func TestFreshDatabaseRecordsOrderedMigrations(t *testing.T) {
 	if err := rows.Err(); err != nil {
 		t.Fatal(err)
 	}
-	if got := len(versions); got != 5 {
-		t.Fatalf("migration versions = %v, want 1..5", versions)
+	if got := len(versions); got != currentMigrationVersion {
+		t.Fatalf("migration versions = %v, want 1..%d", versions, currentMigrationVersion)
 	}
 	for i, version := range versions {
 		if version != i+1 {
-			t.Fatalf("migration versions = %v, want 1..5", versions)
+			t.Fatalf("migration versions = %v, want 1..%d", versions, currentMigrationVersion)
 		}
+	}
+}
+
+func TestOpenRejectsNewerMigrationVersion(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`
+		CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
+		INSERT INTO schema_migrations(version, applied_at) VALUES (?, '2026-01-01T00:00:00Z')
+	`, currentMigrationVersion+1); err != nil {
+		db.Close()
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = Open(path)
+	if err == nil {
+		t.Fatal("Open accepted a database with a newer migration version")
+	}
+	if !strings.Contains(err.Error(), "newer than supported") {
+		t.Fatalf("Open error = %q, want a clear unsupported-version error", err)
+	}
+	if strings.Contains(err.Error(), path) {
+		t.Fatalf("Open error exposed database path: %q", err)
 	}
 }
 
@@ -100,8 +130,8 @@ func TestExistingMainDatabaseUpgradesWithoutLosingRows(t *testing.T) {
 	if err := store.db.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&versions); err != nil {
 		t.Fatal(err)
 	}
-	if versions != 5 {
-		t.Fatalf("migration count = %d, want 5", versions)
+	if versions != currentMigrationVersion {
+		t.Fatalf("migration count = %d, want %d", versions, currentMigrationVersion)
 	}
 }
 
