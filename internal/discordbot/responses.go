@@ -7,7 +7,7 @@ import (
 )
 
 func (b *Bot) respond(s interactionSession, i *discordgo.InteractionCreate, data *discordgo.InteractionResponseData) {
-	if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{Type: discordgo.InteractionResponseChannelMessageWithSource, Data: data}); err != nil {
+	if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{Type: discordgo.InteractionResponseChannelMessageWithSource, Data: data}, discordgo.WithContext(b.ctx)); err != nil {
 		b.logger.Error("respond interaction", "error", err)
 	}
 }
@@ -20,7 +20,7 @@ func (b *Bot) deferInteraction(s interactionSession, i *discordgo.InteractionCre
 	err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseDeferredChannelMessageWithSource,
 		Data: &discordgo.InteractionResponseData{Flags: discordgo.MessageFlagsEphemeral, AllowedMentions: noMentions()},
-	})
+	}, discordgo.WithContext(b.ctx))
 	if err != nil {
 		b.logger.Error("defer interaction", "error", err)
 		return false
@@ -31,7 +31,7 @@ func (b *Bot) deferInteraction(s interactionSession, i *discordgo.InteractionCre
 func (b *Bot) deferComponentUpdate(s interactionSession, i *discordgo.InteractionCreate) bool {
 	err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseDeferredMessageUpdate,
-	})
+	}, discordgo.WithContext(b.ctx))
 	if err != nil {
 		b.logger.Error("defer component interaction", "error", err)
 		return false
@@ -50,7 +50,7 @@ func (b *Bot) editPreview(s interactionSession, i *discordgo.InteractionCreate, 
 		Embeds:          &[]*discordgo.MessageEmbed{embed},
 		AllowedMentions: noMentions(),
 		Components:      &components,
-	})
+	}, discordgo.WithContext(b.ctx))
 	if err != nil {
 		b.logger.Error("edit request preview", "error", err)
 	}
@@ -88,7 +88,7 @@ func (b *Bot) editContent(s interactionSession, i *discordgo.InteractionCreate, 
 		Embeds:          &[]*discordgo.MessageEmbed{},
 		Components:      &components,
 		AllowedMentions: noMentions(),
-	})
+	}, discordgo.WithContext(b.ctx))
 	if err != nil {
 		b.logger.Error(logMessage, "error", err)
 	}

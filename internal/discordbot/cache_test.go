@@ -48,7 +48,7 @@ func TestSelectionCacheSession(t *testing.T) {
 	if _, ok := cache.getQuota("search", "owner"); ok {
 		t.Fatal("quota was reported as cached before it was loaded")
 	}
-	quota := &seer.Quota{TV: seer.QuotaUsage{Restricted: true, Remaining: 3}}
+	quota := &seer.Quota{TV: seer.QuotaUsage{Limit: 5, Used: 2, Restricted: false, Remaining: 3}}
 	if !cache.setQuota("search", "owner", quota) {
 		t.Fatal("owner could not store quota")
 	}
@@ -61,12 +61,12 @@ func TestSelectionCacheSession(t *testing.T) {
 	if !ok || gotQuota.TV.Remaining != 3 {
 		t.Fatal("caller mutated the quota stored in the cache")
 	}
-	if !cache.setSeasons("search", "1", "owner", seer.SeasonSelection{Numbers: []int{1, 3}}) {
-		t.Fatal("owner could not store selected seasons")
-	}
 	available := []seer.Season{{SeasonNumber: 1}, {SeasonNumber: 3}}
 	if !cache.setAvailableSeasons("search", "1", "owner", available) {
 		t.Fatal("owner could not store available seasons")
+	}
+	if err := cache.selectSeasonPage("search", "1", "owner", 0, []int{1, 3}); err != nil {
+		t.Fatal(err)
 	}
 	_, gotAvailable, seasons, ok := cache.selection("search", "1", "owner")
 	if !ok {
@@ -78,9 +78,9 @@ func TestSelectionCacheSession(t *testing.T) {
 	if len(seasons.Numbers) != 2 || seasons.Numbers[0] != 1 || seasons.Numbers[1] != 3 {
 		t.Fatalf("selected seasons = %#v", seasons)
 	}
-	cache.discard("search", "owner")
+	cache.finishSubmission("search", "owner", true)
 	if _, _, _, ok := cache.selection("search", "1", "owner"); ok {
-		t.Fatal("discard did not invalidate the search")
+		t.Fatal("submission did not invalidate the selection")
 	}
 }
 

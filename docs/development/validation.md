@@ -31,3 +31,24 @@ The final gate is the complete `CI` workflow in `.github/workflows/ci.yml` on
 the exact revision. It checks formatting, `go mod tidy -diff`, whitespace,
 tests, vet, the race detector, pinned Staticcheck and govulncheck versions, the
 release build, Docker build, entrypoint behavior, and runtime ownership.
+
+## Recovery and interaction regressions
+
+The deterministic suites cover upgrades from revisions 1–5, repeat startup and
+migration rollback; expired claims, changed/disabled destinations, physical-card
+fences and orphan cleanup; accepted decisions with lost responses or failed
+local persistence; failed DMs, preference suppression and independent card repair;
+modal components decoded from Discord JSON; and startup/shutdown draining.
+
+Request-flow tests cover finite but non-exhausted quotas, clearing and merging
+season pages, duplicate confirmations, stale response ordering, missing account
+link data, ambiguous links across pages, and terminal versus uncertain POST
+outcomes. Compare bounded account lookup to serial lookup with:
+
+```sh
+go test ./internal/seer -run '^$' -bench BenchmarkLinkedUserNotificationScan -benchtime=5x
+```
+
+The benchmark models 20 users with one millisecond of notification-endpoint
+latency. The concurrency regression requires four workers and joins all of them;
+benchmark results describe that fixture, not production Seerr latency.

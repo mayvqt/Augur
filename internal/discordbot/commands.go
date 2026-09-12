@@ -9,6 +9,7 @@ const (
 	commandRequests      = "requests"
 	commandNotifications = "notifications"
 	componentPick        = "augur:pick:"
+	componentSeasonPage  = "augur:season-page:"
 	componentSeasons     = "augur:seasons:"
 	componentAll         = "augur:all:"
 	componentConfirm     = "augur:confirm:"

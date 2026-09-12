@@ -21,21 +21,27 @@ type fakeApprovalHandler struct {
 	released bool
 }
 
-func (f *fakeApprovalHandler) ClaimApproval(context.Context, int, string, string) (bool, error) {
+func (f *fakeApprovalHandler) ClaimApproval(context.Context, int, string, string) (storage.ApprovalMessage, bool, error) {
 	f.claimed = true
-	return true, nil
+	return storage.ApprovalMessage{RequestID: 42, GuildID: "guild-1", ChannelID: "channel-1", ClaimToken: "claim"}, true, nil
 }
 
-func (f *fakeApprovalHandler) FinishApproval(context.Context, int, string, string, string) error {
+func (f *fakeApprovalHandler) FinishApproval(context.Context, storage.ApprovalMessage) error {
 	f.finished = true
 	return errors.New("finish failed")
 }
 
-func (f *fakeApprovalHandler) ReleaseApproval(context.Context, int, string) error {
+func (f *fakeApprovalHandler) RetryApproval(context.Context, storage.ApprovalMessage) error {
 	f.released = true
 	return nil
 }
 
+func (f *fakeApprovalHandler) QueueUntrackedApprovalCleanup(context.Context, storage.ApprovalMessage) (bool, error) {
+	return true, nil
+}
+func (f *fakeApprovalHandler) CompleteApprovalCleanup(context.Context, storage.ApprovalMessage) error {
+	return nil
+}
 func TestSendApprovalCleansUpWhenFinishFails(t *testing.T) {
 	t.Parallel()
 	handler := &fakeApprovalHandler{}
@@ -44,16 +50,16 @@ func TestSendApprovalCleansUpWhenFinishFails(t *testing.T) {
 		handler: handler,
 		logger:  slog.Default(),
 		ctx:     context.Background(),
-		sendApprovalMessage: func(string, *discordgo.MessageSend) (*discordgo.Message, error) {
+		sendApprovalMessage: func(context.Context, string, *discordgo.MessageSend) (*discordgo.Message, error) {
 			return &discordgo.Message{ID: "message-1"}, nil
 		},
-		cleanupApprovalMessage: func(channelID, messageID string) error {
+		cleanupApprovalMessage: func(_ context.Context, channelID, messageID string) error {
 			deleted = channelID == "channel-1" && messageID == "message-1"
 			return nil
 		},
 	}
 
-	bot.sendApproval(context.Background(), storage.ApprovalSettings{GuildID: "guild-1", ChannelID: "channel-1"}, seer.ApprovalRequest{RequestID: 42, Media: seer.SearchResult{Title: "Arrival"}}, false)
+	bot.sendApproval(context.Background(), storage.ApprovalSettings{GuildID: "guild-1", ChannelID: "channel-1"}, seer.ApprovalRequest{RequestID: 42, Media: seer.SearchResult{Title: "Arrival"}})
 
 	if !handler.claimed || !handler.finished || !deleted || !handler.released {
 		t.Fatalf("claim=%t finish=%t deleted=%t released=%t, want all true", handler.claimed, handler.finished, deleted, handler.released)
@@ -145,7 +151,7 @@ func TestAvailableTitleOffersSeerrLinkAndBack(t *testing.T) {
 func TestRelevantQuotaLabelOnlyShowsSelectedMediaType(t *testing.T) {
 	t.Parallel()
 	quota := &seer.Quota{
-		Movie: seer.QuotaUsage{Days: 7, Limit: 10, Used: 6, Remaining: 4, Restricted: true},
+		Movie: seer.QuotaUsage{Days: 7, Limit: 10, Used: 6, Remaining: 4, Restricted: false},
 		TV:    seer.QuotaUsage{Used: 2},
 	}
 	got := relevantQuotaLabel("movie", quota)
@@ -163,8 +169,8 @@ func TestSeasonPickerEnforcesLimitedQuotaAndHidesAllSeasons(t *testing.T) {
 		{SeasonNumber: 3, Name: "Season 3", EpisodeCount: 6},
 		{SeasonNumber: 4, Name: "Season 4", EpisodeCount: 4},
 	}
-	quota := &seer.Quota{TV: seer.QuotaUsage{Restricted: true, Remaining: 3}}
-	components := seasonPickerComponents("cache", "result", seasons, quota, seer.SeasonSelection{})
+	quota := &seer.Quota{TV: seer.QuotaUsage{Limit: 5, Used: 2, Restricted: false, Remaining: 3}}
+	components := seasonPickerComponents("cache", "result", seasons, quota, seer.SeasonSelection{}, 0)
 
 	menu := components[0].(discordgo.ActionsRow).Components[0].(discordgo.SelectMenu)
 	if menu.MaxValues != 3 {
@@ -180,7 +186,7 @@ func TestSeasonPickerShowsAllSeasonsOnlyForUnlimitedQuota(t *testing.T) {
 	t.Parallel()
 	seasons := []seer.Season{{SeasonNumber: 1}, {SeasonNumber: 2}}
 	quota := &seer.Quota{TV: seer.QuotaUsage{Restricted: false}}
-	components := seasonPickerComponents("cache", "result", seasons, quota, seer.SeasonSelection{})
+	components := seasonPickerComponents("cache", "result", seasons, quota, seer.SeasonSelection{}, 0)
 
 	buttons := components[1].(discordgo.ActionsRow).Components
 	if len(buttons) != 2 {
@@ -195,14 +201,14 @@ func TestSeasonPickerShowsAllSeasonsOnlyForUnlimitedQuota(t *testing.T) {
 func TestSeasonPickerKeepsSelectionAndShowsRequestAction(t *testing.T) {
 	t.Parallel()
 	seasons := []seer.Season{{SeasonNumber: 1}, {SeasonNumber: 2}}
-	quota := &seer.Quota{TV: seer.QuotaUsage{Restricted: true, Remaining: 2}}
-	components := seasonPickerComponents("cache", "result", seasons, quota, seer.SeasonSelection{Numbers: []int{2}})
+	quota := &seer.Quota{TV: seer.QuotaUsage{Limit: 5, Used: 3, Restricted: false, Remaining: 2}}
+	components := seasonPickerComponents("cache", "result", seasons, quota, seer.SeasonSelection{Numbers: []int{2}}, 0)
 	menu := components[0].(discordgo.ActionsRow).Components[0].(discordgo.SelectMenu)
 	if menu.Options[0].Default || !menu.Options[1].Default {
 		t.Fatalf("season defaults = %#v", menu.Options)
 	}
 	button := components[1].(discordgo.ActionsRow).Components[0].(discordgo.Button)
-	if button.CustomID != componentConfirm+"cache:result" || button.Label != "Request selected seasons" {
+	if button.CustomID != componentConfirm+"cache:result" || button.Label != "Request 1 selected season(s)" {
 		t.Fatalf("request button = %#v", button)
 	}
 }
@@ -317,10 +323,10 @@ func TestFormatRequestLinesIncludesTerminalStatus(t *testing.T) {
 }
 
 func TestDecisionNotificationPreferencesSuppressMatchingStatus(t *testing.T) {
-	if decisionNotificationEnabled("Approved", storage.NotificationPreferences{Approved: false, Declined: true}) {
+	if (storage.NotificationPreferences{Approved: false, Declined: true}).DecisionEnabled("Approved") {
 		t.Fatal("approved notification was enabled")
 	}
-	if !decisionNotificationEnabled("Declined", storage.NotificationPreferences{Declined: true}) {
+	if !(storage.NotificationPreferences{Declined: true}).DecisionEnabled("Declined") {
 		t.Fatal("declined notification was suppressed")
 	}
 }

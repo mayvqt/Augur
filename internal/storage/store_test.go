@@ -113,7 +113,7 @@ func TestExistingMainDatabaseUpgradesWithoutLosingRows(t *testing.T) {
 	if err != nil || !ok || settings.ChannelID != "channel" || !settings.Enabled {
 		t.Fatalf("upgraded approval settings = %#v, %t, err %v", settings, ok, err)
 	}
-	messages, err := store.ApprovalMessages(context.Background())
+	messages, err := store.DueApprovalMessages(context.Background(), time.Now().UTC())
 	if err != nil || len(messages) != 1 || messages[0].MessageID != "message" || messages[0].DecidedAt.IsZero() {
 		t.Fatalf("upgraded approval messages = %#v, err %v", messages, err)
 	}
@@ -323,14 +323,15 @@ func TestApprovalSettingsAndMessageDedupe(t *testing.T) {
 	if err != nil || !needed {
 		t.Fatalf("NeedsApprovalMessage before claim = %t, %v", needed, err)
 	}
-	claimed, err := store.ClaimApprovalMessage(ctx, message)
+	claim, claimed, err := store.ClaimApprovalMessage(ctx, message, time.Now())
 	if err != nil || !claimed {
 		t.Fatalf("first claim = %t, %v", claimed, err)
 	}
-	claimed, err = store.ClaimApprovalMessage(ctx, message)
+	_, claimed, err = store.ClaimApprovalMessage(ctx, message, time.Now())
 	if err != nil || claimed {
 		t.Fatalf("duplicate claim = %t, %v", claimed, err)
 	}
+	message = claim
 	message.MessageID = "789"
 	if err := store.FinishApprovalMessage(ctx, message); err != nil {
 		t.Fatal(err)
@@ -339,15 +340,16 @@ func TestApprovalSettingsAndMessageDedupe(t *testing.T) {
 	if err != nil || needed {
 		t.Fatalf("NeedsApprovalMessage after claim = %t, %v", needed, err)
 	}
+	message.Status = "Approved"
 	decidedAt := time.Now().UTC().Add(-3 * time.Minute)
-	if err := store.MarkApprovalMessageDecided(ctx, 42, "123", decidedAt); err != nil {
+	if err := store.MarkApprovalMessageDecided(ctx, message, decidedAt); err != nil {
 		t.Fatal(err)
 	}
 	due, err := store.DueApprovalMessages(ctx, time.Now().UTC().Add(-2*time.Minute))
 	if err != nil || len(due) != 1 || due[0].MessageID != "789" {
 		t.Fatalf("DueApprovalMessages() = %#v, %v", due, err)
 	}
-	if err := store.DeleteApprovalMessage(ctx, 42, "123"); err != nil {
+	if err := store.DeleteApprovalMessage(ctx, message); err != nil {
 		t.Fatal(err)
 	}
 	due, err = store.DueApprovalMessages(ctx, time.Now().UTC())

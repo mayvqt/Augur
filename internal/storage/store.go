@@ -37,13 +37,16 @@ type ApprovalSettings struct {
 }
 
 type ApprovalMessage struct {
-	RequestID int
-	GuildID   string
-	ChannelID string
-	MessageID string
-	DecidedAt time.Time
-	Status    string
-	Reason    string
+	RequestID  int
+	GuildID    string
+	ChannelID  string
+	MessageID  string
+	DecidedAt  time.Time
+	Status     string
+	Reason     string
+	ClaimToken string
+	Attempts   int
+	LeaseUntil time.Time
 }
 
 type NotificationPreferences struct {
@@ -55,7 +58,7 @@ type NotificationPreferences struct {
 
 const subscriptionColumnList = "request_id, discord_id, title, media_type, overview, poster_path, release_year, language, rating, created_at, completed_at"
 
-const currentMigrationVersion = 5
+const currentMigrationVersion = 6
 
 func Open(path string) (*Store, error) {
 	dbPath, err := storagePath(path)
@@ -219,14 +222,22 @@ func (s *Store) SetApprovalSettings(ctx context.Context, settings ApprovalSettin
 	if settings.Enabled && settings.ChannelID == "" {
 		return errors.New("channel_id is required when approvals are enabled")
 	}
-	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO approval_settings (guild_id, channel_id, enabled) VALUES (?, ?, ?)
-		ON CONFLICT(guild_id) DO UPDATE SET channel_id = excluded.channel_id, enabled = excluded.enabled
-	`, settings.GuildID, settings.ChannelID, settings.Enabled)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	_, err = tx.ExecContext(ctx, `
+  INSERT INTO approval_settings (guild_id, channel_id, enabled) VALUES (?, ?, ?)
+  ON CONFLICT(guild_id) DO UPDATE SET channel_id = excluded.channel_id, enabled = excluded.enabled
+ `, settings.GuildID, settings.ChannelID, settings.Enabled)
 	if err != nil {
 		return fmt.Errorf("save approval settings: %w", err)
 	}
-	return nil
+	if _, err = tx.ExecContext(ctx, `UPDATE approval_messages SET claim_token='',lease_until=0,next_attempt_at=0 WHERE guild_id=? AND message_id=''`, settings.GuildID); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *Store) ApprovalSettings(ctx context.Context, guildID string) (ApprovalSettings, bool, error) {
@@ -262,94 +273,27 @@ func (s *Store) EnabledApprovalSettings(ctx context.Context) ([]ApprovalSettings
 	return settings, rows.Err()
 }
 
-func (s *Store) NeedsApprovalMessage(ctx context.Context, requestID int) (bool, error) {
-	if requestID <= 0 {
-		return false, errors.New("request_id must be positive")
-	}
-	var needed int
-	err := s.db.QueryRowContext(ctx, `
-		SELECT EXISTS (
-			SELECT 1 FROM approval_settings settings
-			LEFT JOIN approval_messages messages
-				ON messages.guild_id = settings.guild_id AND messages.request_id = ?
-			WHERE settings.enabled = 1 AND messages.request_id IS NULL
-		)
-	`, requestID).Scan(&needed)
-	if err != nil {
-		return false, fmt.Errorf("check approval message coverage: %w", err)
-	}
-	return needed != 0, nil
-}
-
-func (s *Store) ClaimApprovalMessage(ctx context.Context, message ApprovalMessage) (bool, error) {
-	result, err := s.db.ExecContext(ctx, `
-		INSERT INTO approval_messages (request_id, guild_id, channel_id, message_id)
-		VALUES (?, ?, ?, '') ON CONFLICT(request_id, guild_id) DO NOTHING
-	`, message.RequestID, strings.TrimSpace(message.GuildID), strings.TrimSpace(message.ChannelID))
-	if err != nil {
-		return false, fmt.Errorf("claim approval message: %w", err)
-	}
-	n, err := result.RowsAffected()
-	return n == 1, err
-}
-
-func (s *Store) FinishApprovalMessage(ctx context.Context, message ApprovalMessage) error {
-	result, err := s.db.ExecContext(ctx, `UPDATE approval_messages SET message_id = ? WHERE request_id = ? AND guild_id = ? AND message_id = ''`, message.MessageID, message.RequestID, message.GuildID)
-	if err != nil {
-		return fmt.Errorf("finish approval message: %w", err)
-	}
-	n, err := result.RowsAffected()
-	if err != nil || n != 1 {
-		return errors.New("approval message claim was not found")
-	}
-	return nil
-}
-
-func (s *Store) ReleaseApprovalMessage(ctx context.Context, requestID int, guildID string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM approval_messages WHERE request_id = ? AND guild_id = ? AND message_id = ''`, requestID, guildID)
-	return err
-}
-
-func (s *Store) MarkApprovalMessageDecided(ctx context.Context, requestID int, guildID string, decidedAt time.Time) error {
-	if requestID <= 0 || strings.TrimSpace(guildID) == "" {
+func (s *Store) MarkApprovalMessageDecided(ctx context.Context, message ApprovalMessage, decidedAt time.Time) error {
+	if message.RequestID <= 0 || message.GuildID == "" || message.ChannelID == "" || message.MessageID == "" || message.Status == "" {
 		return errors.New("request_id and guild_id are required")
 	}
 	if decidedAt.IsZero() {
 		decidedAt = time.Now().UTC()
 	}
-	_, err := s.db.ExecContext(ctx, `UPDATE approval_messages SET decided_at = ? WHERE request_id = ? AND guild_id = ?`, formatTime(decidedAt), requestID, guildID)
+	_, err := s.db.ExecContext(ctx, `UPDATE approval_messages SET decided_at = ?,status=? WHERE request_id = ? AND guild_id = ? AND channel_id=? AND message_id=? AND (status='' OR status=?)`, formatTime(decidedAt), message.Status, message.RequestID, message.GuildID, message.ChannelID, message.MessageID, message.Status)
 	if err != nil {
 		return fmt.Errorf("mark approval message decided: %w", err)
 	}
 	return nil
 }
 
-func (s *Store) SetApprovalDecision(ctx context.Context, requestID int, guildID, status, reason string) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE approval_messages SET status = ?, reason = ? WHERE request_id = ? AND guild_id = ?`, strings.TrimSpace(status), strings.TrimSpace(reason), requestID, strings.TrimSpace(guildID))
-	return err
-}
-
-func (s *Store) ClaimDecisionNotification(ctx context.Context, requestID int, discordID, status string) (bool, error) {
-	result, err := s.db.ExecContext(ctx, `INSERT INTO decision_notifications(request_id, discord_id, status) VALUES(?,?,?) ON CONFLICT(request_id, discord_id, status) DO NOTHING`, requestID, strings.TrimSpace(discordID), strings.TrimSpace(status))
-	if err != nil {
-		return false, err
-	}
-	n, err := result.RowsAffected()
-	return n == 1, err
-}
-
-func (s *Store) ReleaseDecisionNotification(ctx context.Context, requestID int, discordID, status string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM decision_notifications WHERE request_id = ? AND discord_id = ? AND status = ?`, requestID, strings.TrimSpace(discordID), strings.TrimSpace(status))
-	return err
-}
-
 func (s *Store) DueApprovalMessages(ctx context.Context, before time.Time) ([]ApprovalMessage, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT request_id, guild_id, channel_id, message_id, decided_at, status, reason
+		SELECT request_id, guild_id, channel_id, message_id, decided_at, status, reason, attempts
 		FROM approval_messages
-		WHERE decided_at IS NOT NULL AND decided_at <= ? AND message_id != ''
-		ORDER BY decided_at, request_id
-	`, formatTime(before.UTC()))
+		WHERE decided_at IS NOT NULL AND decided_at <= ? AND message_id != '' AND next_attempt_at <= ?
+		ORDER BY decided_at, request_id LIMIT 100
+	`, formatTime(before.UTC()), time.Now().UnixMilli())
 	if err != nil {
 		return nil, fmt.Errorf("list due approval messages: %w", err)
 	}
@@ -358,7 +302,7 @@ func (s *Store) DueApprovalMessages(ctx context.Context, before time.Time) ([]Ap
 	for rows.Next() {
 		var message ApprovalMessage
 		var decidedAt string
-		if err := rows.Scan(&message.RequestID, &message.GuildID, &message.ChannelID, &message.MessageID, &decidedAt, &message.Status, &message.Reason); err != nil {
+		if err := rows.Scan(&message.RequestID, &message.GuildID, &message.ChannelID, &message.MessageID, &decidedAt, &message.Status, &message.Reason, &message.Attempts); err != nil {
 			return nil, fmt.Errorf("scan due approval message: %w", err)
 		}
 		parsed, err := parseTime(decidedAt)
@@ -371,16 +315,13 @@ func (s *Store) DueApprovalMessages(ctx context.Context, before time.Time) ([]Ap
 	return messages, rows.Err()
 }
 
-func (s *Store) DeleteApprovalMessage(ctx context.Context, requestID int, guildID string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM approval_messages WHERE request_id = ? AND guild_id = ?`, requestID, strings.TrimSpace(guildID))
-	if err != nil {
-		return fmt.Errorf("delete approval message: %w", err)
-	}
-	return nil
+func (s *Store) DeleteApprovalMessage(ctx context.Context, message ApprovalMessage) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM approval_messages WHERE request_id=? AND guild_id=? AND channel_id=? AND message_id=? AND (message_id!='' OR claim_token=?)`, message.RequestID, message.GuildID, message.ChannelID, message.MessageID, message.ClaimToken)
+	return err
 }
 
 func (s *Store) ApprovalMessages(ctx context.Context) ([]ApprovalMessage, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT request_id, guild_id, channel_id, message_id, decided_at, status, reason FROM approval_messages WHERE message_id != ''`)
+	rows, err := s.db.QueryContext(ctx, `SELECT request_id, guild_id, channel_id, message_id, decided_at, status, reason, attempts,claim_token FROM approval_messages WHERE decided_at IS NULL AND next_attempt_at<=? ORDER BY next_attempt_at,request_id,guild_id`, time.Now().UnixMilli())
 	if err != nil {
 		return nil, err
 	}
@@ -389,7 +330,7 @@ func (s *Store) ApprovalMessages(ctx context.Context) ([]ApprovalMessage, error)
 	for rows.Next() {
 		var m ApprovalMessage
 		var decided sql.NullString
-		if err := rows.Scan(&m.RequestID, &m.GuildID, &m.ChannelID, &m.MessageID, &decided, &m.Status, &m.Reason); err != nil {
+		if err := rows.Scan(&m.RequestID, &m.GuildID, &m.ChannelID, &m.MessageID, &decided, &m.Status, &m.Reason, &m.Attempts, &m.ClaimToken); err != nil {
 			return nil, err
 		}
 		if decided.Valid {
@@ -499,6 +440,26 @@ func (s *Store) applyMigration(ctx context.Context, version int) error {
 		3: {`ALTER TABLE approval_messages ADD COLUMN status TEXT NOT NULL DEFAULT ''`, `ALTER TABLE approval_messages ADD COLUMN reason TEXT NOT NULL DEFAULT ''`},
 		4: {`CREATE TABLE IF NOT EXISTS notification_preferences (discord_id TEXT PRIMARY KEY, approved INTEGER NOT NULL DEFAULT 1 CHECK (approved IN (0,1)), declined INTEGER NOT NULL DEFAULT 1 CHECK (declined IN (0,1)), available INTEGER NOT NULL DEFAULT 1 CHECK (available IN (0,1)))`},
 		5: {`CREATE TABLE IF NOT EXISTS decision_notifications (request_id INTEGER NOT NULL, discord_id TEXT NOT NULL, status TEXT NOT NULL, PRIMARY KEY(request_id, discord_id, status))`},
+		6: {
+			`CREATE TABLE approval_cleanup(channel_id TEXT NOT NULL,message_id TEXT NOT NULL,attempts INTEGER NOT NULL DEFAULT 0,next_attempt_at INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(channel_id,message_id))`,
+			`CREATE INDEX idx_approval_cleanup_due ON approval_cleanup(next_attempt_at,channel_id,message_id)`,
+			`CREATE TABLE decision_intents(request_id INTEGER PRIMARY KEY CHECK(request_id>0),status TEXT NOT NULL CHECK(status IN ('Approved','Declined')),actor TEXT NOT NULL,reason TEXT NOT NULL,title TEXT NOT NULL DEFAULT '',url TEXT NOT NULL DEFAULT '',poster_url TEXT NOT NULL DEFAULT '',created_at TEXT NOT NULL,next_attempt_at INTEGER NOT NULL DEFAULT 0)`,
+			`CREATE INDEX idx_decision_intents_due ON decision_intents(next_attempt_at,request_id)`,
+			`ALTER TABLE approval_messages ADD COLUMN claim_token TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE approval_messages ADD COLUMN lease_until INTEGER NOT NULL DEFAULT 0`,
+			`ALTER TABLE approval_messages ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0`,
+			`ALTER TABLE approval_messages ADD COLUMN next_attempt_at INTEGER NOT NULL DEFAULT 0`,
+			`CREATE TABLE decision_jobs (
+    request_id INTEGER NOT NULL CHECK(request_id>0), status TEXT NOT NULL CHECK(status IN ('Approved','Declined')),
+    requester_id INTEGER NOT NULL DEFAULT 0, media_id INTEGER NOT NULL DEFAULT 0, media_type TEXT NOT NULL DEFAULT '',
+    title TEXT NOT NULL DEFAULT '', url TEXT NOT NULL DEFAULT '', poster_url TEXT NOT NULL DEFAULT '',
+    actor TEXT NOT NULL DEFAULT '', reason TEXT NOT NULL DEFAULT '', decided_at TEXT NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0, next_attempt_at INTEGER NOT NULL DEFAULT 0, completed_at TEXT,
+    PRIMARY KEY(request_id,status))`,
+			`CREATE INDEX idx_decision_jobs_due ON decision_jobs(next_attempt_at,request_id) WHERE completed_at IS NULL`,
+			`CREATE INDEX idx_approval_cleanup ON approval_messages(decided_at,request_id) WHERE decided_at IS NOT NULL`,
+			`CREATE INDEX idx_approval_refresh ON approval_messages(next_attempt_at,request_id) WHERE decided_at IS NULL AND message_id!=''`,
+		},
 	}
 	columns := map[string]map[string]struct{}{}
 	if version == 2 || version == 3 {

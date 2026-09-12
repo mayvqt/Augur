@@ -5,6 +5,7 @@ services:
     container_name: augur
     restart: unless-stopped
     init: true
+    stop_grace_period: 45s
     security_opt:
       - no-new-privileges:true
     tmpfs:

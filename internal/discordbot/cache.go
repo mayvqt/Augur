@@ -3,7 +3,9 @@ package discordbot
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 	"sync"
 	"time"
@@ -22,12 +24,15 @@ type selectionCache struct {
 }
 
 type cachedSearch struct {
-	ownerID    string
-	query      string
-	expiresAt  time.Time
-	results    []cachedSelection
-	quota      *seer.Quota
-	quotaKnown bool
+	interactionMu sync.Mutex
+	ownerID       string
+	query         string
+	expiresAt     time.Time
+	results       []cachedSelection
+	quota         *seer.Quota
+	quotaKnown    bool
+	submitting    bool
+	submitted     bool
 }
 
 type cachedSelection struct {
@@ -64,7 +69,7 @@ func (c *selectionCache) setResults(cacheID, ownerID string, results []seer.Sear
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	search, ok := c.searchLocked(cacheID, ownerID)
-	if !ok {
+	if !ok || search.submitting || search.submitted {
 		return false
 	}
 	search.results = make([]cachedSelection, len(results))
@@ -147,21 +152,6 @@ func (c *selectionCache) getQuota(cacheID, ownerID string) (*seer.Quota, bool) {
 	return &quotaCopy, true
 }
 
-func (c *selectionCache) setSeasons(cacheID, key, ownerID string, seasons seer.SeasonSelection) bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	selection, ok := c.selectionLocked(cacheID, key, ownerID)
-	if !ok {
-		return false
-	}
-	selection.selectedSeasons = seer.SeasonSelection{
-		Numbers: append([]int(nil), seasons.Numbers...),
-		All:     seasons.All,
-	}
-	return true
-}
-
 func (c *selectionCache) setAvailableSeasons(cacheID, key, ownerID string, seasons []seer.Season) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -186,18 +176,115 @@ func (c *selectionCache) selection(cacheID, key, ownerID string) (seer.SearchRes
 	}, true
 }
 
-func (c *selectionCache) discard(cacheID, ownerID string) {
+// A search owns its response ordering. Other searches remain independent; a
+// concurrent click gets an immediate ephemeral acknowledgement instead of
+// waiting behind a network call and later overwriting the completed response.
+func (c *selectionCache) beginInteraction(cacheID, ownerID string) (func(), bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-
-	if _, ok := c.searchLocked(cacheID, ownerID); ok {
-		delete(c.searches, cacheID)
+	search, ok := c.searchLocked(cacheID, ownerID)
+	if !ok || !search.interactionMu.TryLock() {
+		return nil, false
 	}
+	search.expiresAt = time.Now().Add(selectionTTL)
+	return search.interactionMu.Unlock, true
+}
+
+// submissionState is checked before acknowledging components so stale clicks do
+// not replace the response belonging to the request already in progress.
+func (c *selectionCache) submissionState(cacheID, ownerID string) string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	search, ok := c.searchLocked(cacheID, ownerID)
+	if !ok {
+		return "expired"
+	}
+	if search.submitted {
+		return "submitted"
+	}
+	if search.submitting {
+		return "submitting"
+	}
+	return ""
+}
+
+func (c *selectionCache) beginSubmission(cacheID, key, ownerID string, all bool) (seer.SearchResult, seer.SeasonSelection, string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	search, ok := c.searchLocked(cacheID, ownerID)
+	if !ok {
+		return seer.SearchResult{}, seer.SeasonSelection{}, "expired"
+	}
+	if search.submitted {
+		return seer.SearchResult{}, seer.SeasonSelection{}, "submitted"
+	}
+	if search.submitting {
+		return seer.SearchResult{}, seer.SeasonSelection{}, "submitting"
+	}
+	selection, ok := c.selectionLocked(cacheID, key, ownerID)
+	if !ok {
+		return seer.SearchResult{}, seer.SeasonSelection{}, "expired"
+	}
+	if all {
+		selection.selectedSeasons = seer.SeasonSelection{All: true}
+	}
+	search.submitting = true
+	return selection.result, seer.SeasonSelection{All: selection.selectedSeasons.All, Numbers: append([]int(nil), selection.selectedSeasons.Numbers...)}, ""
+}
+
+func (c *selectionCache) finishSubmission(cacheID, ownerID string, consumed bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	// Retain a tombstone until expiry. Delayed duplicate clicks must leave the
+	// successful response intact, including a request accepted before a local error.
+	if search, ok := c.searches[cacheID]; ok && search.ownerID == ownerID {
+		search.submitting = false
+		search.submitted = consumed
+	}
+}
+
+func (c *selectionCache) selectSeasonPage(cacheID, key, ownerID string, page int, numbers []int) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	selection, ok := c.selectionLocked(cacheID, key, ownerID)
+	if !ok {
+		return errors.New("that season picker expired; run `/request` again")
+	}
+	visible, ok := seasonPage(selection.availableSeasons, page)
+	if !ok {
+		return errors.New("that season page is no longer available")
+	}
+	allowed := make(map[int]bool, len(visible))
+	for _, season := range visible {
+		allowed[season.SeasonNumber] = true
+	}
+	merged := make(map[int]bool)
+	for _, number := range selection.selectedSeasons.Numbers {
+		if !allowed[number] {
+			merged[number] = true
+		}
+	}
+	for _, number := range numbers {
+		if !allowed[number] {
+			return errors.New("choose seasons from the displayed page")
+		}
+		merged[number] = true
+	}
+	next := seer.SeasonSelection{}
+	for number := range merged {
+		next.Numbers = append(next.Numbers, number)
+	}
+	sort.Ints(next.Numbers)
+	if err := validatePickerSelection(next, c.searches[cacheID].quota); err != nil {
+		return err
+	}
+	selection.selectedSeasons = next
+	return nil
 }
 
 func (c *selectionCache) selectionLocked(cacheID, key, ownerID string) (*cachedSelection, bool) {
 	search, ok := c.searchLocked(cacheID, ownerID)
-	if !ok {
+	if !ok || search.submitting || search.submitted {
 		return nil, false
 	}
 	index, err := strconv.Atoi(key)

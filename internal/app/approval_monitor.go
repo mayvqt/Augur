@@ -18,16 +18,21 @@ func (r *Runner) reconcileApprovals(ctx context.Context) {
 		return
 	}
 	approvals := make([]seer.ApprovalRequest, 0, len(requests))
+	pendingIDs := make(map[int]bool, len(requests))
 	for _, request := range requests {
 		if ctx.Err() != nil {
 			return
 		}
+		if !seer.IsPendingRequest(request.Status) || request.ID <= 0 {
+			continue
+		}
+		pendingIDs[request.ID] = true
 		approval, ok := r.pendingApproval(ctx, request)
 		if ok {
 			approvals = append(approvals, approval)
 		}
 	}
-	if err := r.bot.ReconcileApprovals(ctx, approvals); err != nil && ctx.Err() == nil {
+	if err := r.bot.ReconcileApprovals(ctx, approvals, pendingIDs); err != nil && ctx.Err() == nil {
 		r.logger.Error("reconcile Discord approval messages", "error", err)
 	}
 }

@@ -232,9 +232,27 @@ func (b *Bot) searchAndShow(ctx context.Context, s interactionSession, i *discor
 
 func (b *Bot) handleComponent(s interactionSession, i *discordgo.InteractionCreate) {
 	data := i.MessageComponentData()
+	for _, prefix := range []string{componentPick, componentSeasons, componentSeasonPage, componentAll, componentConfirm, componentBack, componentRetry, componentSearch} {
+		if value, ok := strings.CutPrefix(data.CustomID, prefix); ok {
+			cacheID, _, _ := strings.Cut(value, ":")
+			unlock, ok := b.cache.beginInteraction(cacheID, interactionUserID(i))
+			if !ok {
+				b.ephemeral(s, i, "This search is busy or expired. Wait for the current action, or run `/request` again.")
+				return
+			}
+			defer unlock()
+			if state := b.cache.submissionState(cacheID, interactionUserID(i)); state == "submitting" || state == "submitted" {
+				b.submissionNotice(s, i, state)
+				return
+			}
+			break
+		}
+	}
 	switch {
 	case strings.HasPrefix(data.CustomID, componentPick):
 		b.handlePick(s, i, data)
+	case strings.HasPrefix(data.CustomID, componentSeasonPage):
+		b.handleSeasonPage(s, i, data)
 	case strings.HasPrefix(data.CustomID, componentSeasons):
 		b.handleSeasons(s, i, data)
 	case strings.HasPrefix(data.CustomID, componentAll):
@@ -296,22 +314,27 @@ func (b *Bot) handlePick(s interactionSession, i *discordgo.InteractionCreate, d
 		b.edit(s, i, expiredPickerMessage)
 		return
 	}
-	b.editPreview(
-		s,
-		i,
-		b.mediaPreview(result, quota),
-		seasonPickerComponents(cacheID, key, seasons, quota, seer.SeasonSelection{}),
-	)
+	b.showSeasonSelection(s, i, cacheID, key, 0, "")
+}
+
+func seasonComponentSelection(customID, prefix string) (cacheID, key string, page int, ok bool) {
+	cacheID, tail, valid := componentSelection(customID, prefix)
+	if !valid {
+		return "", "", 0, false
+	}
+	key, pageText, hasPage := strings.Cut(tail, ":")
+	if !hasPage {
+		return cacheID, key, 0, key != ""
+	}
+	page, err := strconv.Atoi(pageText)
+	return cacheID, key, page, err == nil && page >= 0 && key != ""
 }
 
 func (b *Bot) handleSeasons(s interactionSession, i *discordgo.InteractionCreate, data discordgo.MessageComponentInteractionData) {
-	if len(data.Values) == 0 {
-		return
-	}
 	if !b.deferComponentUpdate(s, i) {
 		return
 	}
-	cacheID, key, ok := componentSelection(data.CustomID, componentSeasons)
+	cacheID, key, page, ok := seasonComponentSelection(data.CustomID, componentSeasons)
 	if !ok {
 		b.edit(s, i, "That season picker is invalid. Run `/request` again.")
 		return
@@ -321,35 +344,37 @@ func (b *Bot) handleSeasons(s interactionSession, i *discordgo.InteractionCreate
 		b.edit(s, i, err.Error())
 		return
 	}
-	b.showSeasonSelection(s, i, cacheID, key, selection)
+	notice := ""
+	if err := b.cache.selectSeasonPage(cacheID, key, interactionUserID(i), page, selection.Numbers); err != nil {
+		notice = err.Error()
+	}
+	b.showSeasonSelection(s, i, cacheID, key, page, notice)
 }
 
-func (b *Bot) handleAllSeasons(s interactionSession, i *discordgo.InteractionCreate, data discordgo.MessageComponentInteractionData) {
+func (b *Bot) handleSeasonPage(s interactionSession, i *discordgo.InteractionCreate, data discordgo.MessageComponentInteractionData) {
 	if !b.deferComponentUpdate(s, i) {
 		return
 	}
-	cacheID, key, ok := componentSelection(data.CustomID, componentAll)
+	cacheID, key, page, ok := seasonComponentSelection(data.CustomID, componentSeasonPage)
 	if !ok {
-		b.edit(s, i, "That season selection is invalid. Run `/request` again.")
+		b.edit(s, i, "That season page is invalid. Run `/request` again.")
 		return
 	}
-	ownerID := interactionUserID(i)
-	if !b.cache.setSeasons(cacheID, key, ownerID, seer.SeasonSelection{All: true}) {
-		b.edit(s, i, expiredSeasonPickerMessage)
-		return
-	}
-	b.submitRequest(s, i, cacheID, key)
+	b.showSeasonSelection(s, i, cacheID, key, page, "")
 }
 
-func (b *Bot) showSeasonSelection(
-	s interactionSession,
-	i *discordgo.InteractionCreate,
-	cacheID string,
-	key string,
-	selection seer.SeasonSelection,
-) {
+func (b *Bot) handleAllSeasons(s interactionSession, i *discordgo.InteractionCreate, data discordgo.MessageComponentInteractionData) {
+	cacheID, key, ok := componentSelection(data.CustomID, componentAll)
+	if !ok {
+		b.ephemeral(s, i, "That season selection is invalid. Run `/request` again.")
+		return
+	}
+	b.submitRequest(s, i, cacheID, key, true)
+}
+
+func (b *Bot) showSeasonSelection(s interactionSession, i *discordgo.InteractionCreate, cacheID, key string, page int, notice string) {
 	ownerID := interactionUserID(i)
-	result, seasons, _, ok := b.cache.selection(cacheID, key, ownerID)
+	result, seasons, selection, ok := b.cache.selection(cacheID, key, ownerID)
 	if !ok || result.MediaType != "tv" {
 		b.edit(s, i, expiredSeasonPickerMessage)
 		return
@@ -359,40 +384,52 @@ func (b *Bot) showSeasonSelection(
 		b.edit(s, i, expiredSeasonPickerMessage)
 		return
 	}
-	if err := validatePickerSelection(selection, quota); err != nil {
-		b.edit(s, i, err.Error())
-		return
-	}
-	if !b.cache.setSeasons(cacheID, key, ownerID, selection) {
-		b.edit(s, i, expiredSeasonPickerMessage)
-		return
+	if _, valid := seasonPage(seasons, page); !valid {
+		page = 0
 	}
 	embed := b.mediaPreview(result, quota)
-	b.editPreview(
-		s,
-		i,
-		embed,
-		seasonPickerComponents(cacheID, key, seasons, quota, selection),
-	)
+	if len(selection.Numbers) > 0 {
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Selected seasons", Value: truncate(seasonSelectionLabel(selection), 1024)})
+	}
+	if notice != "" {
+		embed.Footer.Text = truncate(notice, 2048)
+	}
+	if len(seasons) == 0 {
+		embed.Footer.Text = "No seasons are available to select for this show."
+	}
+	b.editPreview(s, i, embed, seasonPickerComponents(cacheID, key, seasons, quota, selection, page))
 }
 
 func (b *Bot) handleConfirm(s interactionSession, i *discordgo.InteractionCreate, data discordgo.MessageComponentInteractionData) {
-	if !b.deferComponentUpdate(s, i) {
-		return
-	}
 	cacheID, key, ok := componentSelection(data.CustomID, componentConfirm)
 	if !ok {
-		b.edit(s, i, "That confirmation is invalid. Run `/request` again.")
+		b.ephemeral(s, i, "That confirmation is invalid. Run `/request` again.")
 		return
 	}
-	b.submitRequest(s, i, cacheID, key)
+	b.submitRequest(s, i, cacheID, key, false)
 }
 
-func (b *Bot) submitRequest(s interactionSession, i *discordgo.InteractionCreate, cacheID, key string) {
+func (b *Bot) submissionNotice(s interactionSession, i *discordgo.InteractionCreate, state string) {
+	message := "That confirmation expired. Run `/request` again."
+	if state == "submitting" {
+		message = "Your request is being submitted. Please wait."
+	}
+	if state == "submitted" {
+		message = "This confirmation has already been used. Check `/requests` or Seerr for its status."
+	}
+	b.ephemeral(s, i, message)
+}
+
+func (b *Bot) submitRequest(s interactionSession, i *discordgo.InteractionCreate, cacheID, key string, all bool) {
 	ownerID := interactionUserID(i)
-	result, _, seasons, ok := b.cache.selection(cacheID, key, ownerID)
-	if !ok {
-		b.edit(s, i, "That confirmation expired or was already used. Run `/request` again.")
+	result, seasons, state := b.cache.beginSubmission(cacheID, key, ownerID, all)
+	if state != "" {
+		b.submissionNotice(s, i, state)
+		return
+	}
+	consumed := false
+	defer func() { b.cache.finishSubmission(cacheID, ownerID, consumed) }()
+	if !b.deferComponentUpdate(s, i) {
 		return
 	}
 	ctx, cancel := context.WithTimeout(b.ctx, 30*time.Second)
@@ -405,26 +442,26 @@ func (b *Bot) submitRequest(s interactionSession, i *discordgo.InteractionCreate
 			message = userErr.UserMessage()
 		}
 		var submitted interface{ RequestSubmitted() bool }
-		if errors.As(err, &submitted) && submitted.RequestSubmitted() {
-			b.cache.discard(cacheID, ownerID)
-			b.edit(s, i, truncate(message, 300))
-			b.logger.Error("track submitted request", "request_id", req.ID, "media_type", result.MediaType, "media_id", result.ID, "error", err)
-			return
+		var retry interface{ SafeToRetry() bool }
+		consumed = (errors.As(err, &submitted) && submitted.RequestSubmitted()) || (errors.As(err, &retry) && !retry.SafeToRetry())
+		if consumed {
+			b.edit(s, i, truncate(message, 500))
+		} else {
+			b.editRetry(s, i, truncate(message, 300), cacheID, key)
 		}
-		b.editRetry(s, i, truncate(message, 180), cacheID, key)
-		b.logger.Error("request media failed", "media_type", result.MediaType, "media_id", result.ID, "error", err)
+		b.logger.Error("request media failed", "request_id", req.ID, "media_type", result.MediaType, "media_id", result.ID, "error", err)
 		return
 	}
-	b.cache.discard(cacheID, ownerID)
-	if seer.IsPendingRequest(req.Status) {
-		b.postApproval(ctx, i.GuildID, req.ID, ownerID, result, seasons)
-	}
+	consumed = true
 	title := escapeMarkdown(optionLabel(result))
 	selection := ""
 	if result.MediaType == "tv" {
-		selection = "\nSelected: **" + escapeMarkdown(seasonSelectionLabel(seasons)) + "**"
+		selection = "\nSelected: **" + truncate(escapeMarkdown(seasonSelectionLabel(seasons)), 900) + "**"
 	}
-	b.edit(s, i, fmt.Sprintf("Your request for **%s** has been submitted successfully.%s\nYou will receive a direct message when it is fully available.", title, selection))
+	b.edit(s, i, fmt.Sprintf("Your request for **%s** has been submitted.%s\nCheck `/requests` for its status. DM preferences are available in `/notifications`.", title, selection))
+	if seer.IsPendingRequest(req.Status) {
+		b.postApproval(ctx, i.GuildID, req.ID, ownerID, result, seasons)
+	}
 }
 
 func (b *Bot) handleBack(s interactionSession, i *discordgo.InteractionCreate, data discordgo.MessageComponentInteractionData) {
@@ -448,15 +485,12 @@ func (b *Bot) handleBack(s interactionSession, i *discordgo.InteractionCreate, d
 }
 
 func (b *Bot) handleRetry(s interactionSession, i *discordgo.InteractionCreate, data discordgo.MessageComponentInteractionData) {
-	if !b.deferComponentUpdate(s, i) {
-		return
-	}
 	cacheID, key, ok := componentSelection(data.CustomID, componentRetry)
 	if !ok {
-		b.edit(s, i, "That retry expired. Run `/request` again.")
+		b.ephemeral(s, i, "That retry expired. Run `/request` again.")
 		return
 	}
-	b.submitRequest(s, i, cacheID, key)
+	b.submitRequest(s, i, cacheID, key, false)
 }
 
 func (b *Bot) handleSearchRetry(s interactionSession, i *discordgo.InteractionCreate, data discordgo.MessageComponentInteractionData) {
@@ -489,9 +523,6 @@ func parseSeasonValues(values []string) (seer.SeasonSelection, error) {
 		seen[number] = struct{}{}
 		selection.Numbers = append(selection.Numbers, number)
 	}
-	if len(selection.Numbers) == 0 {
-		return seer.SeasonSelection{}, errors.New("select at least one season")
-	}
 	sort.Ints(selection.Numbers)
 	return selection, nil
 }
@@ -507,12 +538,12 @@ func componentSelection(customID, prefix string) (cacheID, key string, ok bool) 
 
 func validatePickerSelection(selection seer.SeasonSelection, quota *seer.Quota) error {
 	if selection.All {
-		if quota == nil || quota.TV.Restricted {
+		if quota == nil || quota.TV.Limited() {
 			return errors.New("all seasons are only available with an unlimited TV request limit")
 		}
 		return nil
 	}
-	if quota != nil && quota.TV.Restricted && len(selection.Numbers) > quota.TV.Remaining {
+	if quota != nil && quota.TV.Limited() && len(selection.Numbers) > quota.TV.Remaining {
 		return fmt.Errorf("you can select up to %d more TV season(s)", quota.TV.Remaining)
 	}
 	return nil
