@@ -152,6 +152,7 @@ func (f *fakeSeer) UpdateRequestStatus(ctx context.Context, id int, action strin
 }
 
 type fakeStore struct {
+	stateStore
 	pending           []storage.Subscription
 	pendingByID       map[int]storage.Subscription
 	added             []storage.Subscription
@@ -231,19 +232,19 @@ func (f *fakeStore) NeedsApprovalMessage(ctx context.Context, requestID int) (bo
 	return f.approval.Enabled, ctx.Err()
 }
 
-func (f *fakeStore) ClaimApprovalMessage(ctx context.Context, message storage.ApprovalMessage) (bool, error) {
-	return true, ctx.Err()
+func (f *fakeStore) ClaimApprovalMessage(ctx context.Context, message storage.ApprovalMessage, now time.Time) (storage.ApprovalMessage, bool, error) {
+	return message, true, ctx.Err()
 }
 
 func (f *fakeStore) FinishApprovalMessage(ctx context.Context, message storage.ApprovalMessage) error {
 	return ctx.Err()
 }
 
-func (f *fakeStore) ReleaseApprovalMessage(ctx context.Context, requestID int, guildID string) error {
+func (f *fakeStore) RetryApprovalMessage(ctx context.Context, message storage.ApprovalMessage, retryAt time.Time) error {
 	return ctx.Err()
 }
 
-func (f *fakeStore) MarkApprovalMessageDecided(ctx context.Context, requestID int, guildID string, decidedAt time.Time) error {
+func (f *fakeStore) MarkApprovalMessageDecided(ctx context.Context, message storage.ApprovalMessage, decidedAt time.Time) error {
 	return ctx.Err()
 }
 
@@ -251,20 +252,14 @@ func (f *fakeStore) DueApprovalMessages(ctx context.Context, before time.Time) (
 	return nil, ctx.Err()
 }
 
-func (f *fakeStore) DeleteApprovalMessage(ctx context.Context, requestID int, guildID string) error {
+func (f *fakeStore) DeleteApprovalMessage(ctx context.Context, message storage.ApprovalMessage) error {
 	return ctx.Err()
 }
 func (f *fakeStore) ApprovalMessages(ctx context.Context) ([]storage.ApprovalMessage, error) {
 	return nil, ctx.Err()
 }
-func (f *fakeStore) SetApprovalDecision(ctx context.Context, requestID int, guildID, status, reason string) error {
-	return ctx.Err()
-}
-func (f *fakeStore) ClaimDecisionNotification(ctx context.Context, requestID int, discordID, status string) (bool, error) {
-	return true, ctx.Err()
-}
-func (f *fakeStore) ReleaseDecisionNotification(ctx context.Context, requestID int, discordID, status string) error {
-	return ctx.Err()
+func (f *fakeStore) DueDecisionJobs(ctx context.Context, now time.Time, limit int) ([]storage.DecisionJob, error) {
+	return nil, ctx.Err()
 }
 func (f *fakeStore) NotificationPreferences(ctx context.Context, discordID string) (storage.NotificationPreferences, error) {
 	if f.notificationPrefs != nil {
@@ -293,7 +288,7 @@ type fakeNotifier struct {
 	notifyErr     error
 }
 
-func (f *fakeNotifier) ReconcileApprovals(ctx context.Context, approvals []seer.ApprovalRequest) error {
+func (f *fakeNotifier) ReconcileApprovals(ctx context.Context, approvals []seer.ApprovalRequest, pendingIDs map[int]bool) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -321,4 +316,13 @@ func (f *fakeNotifier) NotifyComplete(ctx context.Context, discordID string, med
 
 func (f *fakeNotifier) Close() error {
 	return nil
+}
+
+func (f *fakeNotifier) NotifyDecision(ctx context.Context, id string, d storage.ApprovalDecision) error {
+	return errors.Join(ctx.Err(), f.notifyErr)
+}
+func (f *fakeNotifier) MaintainApprovals(ctx context.Context) error { return ctx.Err() }
+
+func (f *fakeStore) DueDecisionIntents(ctx context.Context, now time.Time) ([]storage.DecisionIntent, error) {
+	return nil, ctx.Err()
 }

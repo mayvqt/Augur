@@ -12,7 +12,7 @@
     </Overview>
     <Category>MediaApp:Other Network:Other</Category>
     <TemplateURL>https://raw.githubusercontent.com/mayvqt/Augur/main/unraid/augur.xml</TemplateURL>
-    <ExtraParams>--restart=unless-stopped --init --tmpfs /tmp --security-opt=no-new-privileges:true</ExtraParams>
+    <ExtraParams>--restart=unless-stopped --stop-timeout=45 --init --tmpfs /tmp --security-opt=no-new-privileges:true</ExtraParams>
     <Config Name="Appdata" Target="/data" Default="/mnt/user/appdata/augur" Mode="rw"
             Description="Persistent config and SQLite database files." Type="Path" Display="always" Required="true"
             Mask="false"/>

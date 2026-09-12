@@ -129,8 +129,9 @@ func (r *Runner) Run(ctx context.Context) error {
 		r.health.SetReady(true)
 	}
 
-	r.wg.Add(1)
+	r.wg.Add(2)
 	go r.runMonitor(runCtx)
+	go r.runDecisionWorker(runCtx)
 
 	<-runCtx.Done()
 	r.logger.Info("shutdown requested")
@@ -150,7 +151,7 @@ func (r *Runner) Close() error {
 	if running {
 		select {
 		case <-runDone:
-		case <-time.After(10 * time.Second):
+		case <-time.After(30 * time.Second):
 			return errors.New("runner shutdown timed out")
 		}
 	}

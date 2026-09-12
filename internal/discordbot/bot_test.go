@@ -21,21 +21,27 @@ type fakeApprovalHandler struct {
 	released bool
 }
 
-func (f *fakeApprovalHandler) ClaimApproval(context.Context, int, string, string) (bool, error) {
+func (f *fakeApprovalHandler) ClaimApproval(context.Context, int, string, string) (storage.ApprovalMessage, bool, error) {
 	f.claimed = true
-	return true, nil
+	return storage.ApprovalMessage{RequestID: 42, GuildID: "guild-1", ChannelID: "channel-1", ClaimToken: "claim"}, true, nil
 }
 
-func (f *fakeApprovalHandler) FinishApproval(context.Context, int, string, string, string) error {
+func (f *fakeApprovalHandler) FinishApproval(context.Context, storage.ApprovalMessage) error {
 	f.finished = true
 	return errors.New("finish failed")
 }
 
-func (f *fakeApprovalHandler) ReleaseApproval(context.Context, int, string) error {
+func (f *fakeApprovalHandler) RetryApproval(context.Context, storage.ApprovalMessage) error {
 	f.released = true
 	return nil
 }
 
+func (f *fakeApprovalHandler) QueueUntrackedApprovalCleanup(context.Context, storage.ApprovalMessage) (bool, error) {
+	return true, nil
+}
+func (f *fakeApprovalHandler) CompleteApprovalCleanup(context.Context, storage.ApprovalMessage) error {
+	return nil
+}
 func TestSendApprovalCleansUpWhenFinishFails(t *testing.T) {
 	t.Parallel()
 	handler := &fakeApprovalHandler{}
@@ -44,16 +50,16 @@ func TestSendApprovalCleansUpWhenFinishFails(t *testing.T) {
 		handler: handler,
 		logger:  slog.Default(),
 		ctx:     context.Background(),
-		sendApprovalMessage: func(string, *discordgo.MessageSend) (*discordgo.Message, error) {
+		sendApprovalMessage: func(context.Context, string, *discordgo.MessageSend) (*discordgo.Message, error) {
 			return &discordgo.Message{ID: "message-1"}, nil
 		},
-		cleanupApprovalMessage: func(channelID, messageID string) error {
+		cleanupApprovalMessage: func(_ context.Context, channelID, messageID string) error {
 			deleted = channelID == "channel-1" && messageID == "message-1"
 			return nil
 		},
 	}
 
-	bot.sendApproval(context.Background(), storage.ApprovalSettings{GuildID: "guild-1", ChannelID: "channel-1"}, seer.ApprovalRequest{RequestID: 42, Media: seer.SearchResult{Title: "Arrival"}}, false)
+	bot.sendApproval(context.Background(), storage.ApprovalSettings{GuildID: "guild-1", ChannelID: "channel-1"}, seer.ApprovalRequest{RequestID: 42, Media: seer.SearchResult{Title: "Arrival"}})
 
 	if !handler.claimed || !handler.finished || !deleted || !handler.released {
 		t.Fatalf("claim=%t finish=%t deleted=%t released=%t, want all true", handler.claimed, handler.finished, deleted, handler.released)
@@ -317,10 +323,10 @@ func TestFormatRequestLinesIncludesTerminalStatus(t *testing.T) {
 }
 
 func TestDecisionNotificationPreferencesSuppressMatchingStatus(t *testing.T) {
-	if decisionNotificationEnabled("Approved", storage.NotificationPreferences{Approved: false, Declined: true}) {
+	if (storage.NotificationPreferences{Approved: false, Declined: true}).DecisionEnabled("Approved") {
 		t.Fatal("approved notification was enabled")
 	}
-	if !decisionNotificationEnabled("Declined", storage.NotificationPreferences{Declined: true}) {
+	if !(storage.NotificationPreferences{Declined: true}).DecisionEnabled("Declined") {
 		t.Fatal("declined notification was suppressed")
 	}
 }

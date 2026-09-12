@@ -32,7 +32,18 @@ Cards cover pending requests from all Seerr sources, including requests made
 outside Discord. Choose a channel whose members may see those requests. The bot
 needs View Channel, Send Messages, Embed Links, and Manage Messages there.
 
-Declines can include an optional reason, stored by Augur. Linked requesters can
-receive decision DMs according to their notification preferences. Cards are
-removed two minutes after a decision. Discord privacy settings must allow DMs
-from the bot for notifications to arrive.
+Declines can include an optional reason, saved before the decision is sent to
+Seerr. A failed update keeps the card available for retry. If Seerr accepted the
+decision but its response was lost, Augur checks its status and preserves the
+saved reason. A stale button shows the recorded decision and its original author.
+
+Linked requesters can receive decision DMs according to their notification
+preferences. Failed deliveries retry after restarts, independently of card
+updates. Disabled notifications are skipped; enabling them later does not replay
+those past decisions. Discord privacy settings must allow DMs from the bot.
+
+Cards are removed about two minutes after their decided state is displayed.
+Failed sends, updates and cleanup retry with backoff. Changing the approval
+channel applies to new deliveries; existing cards remain in their original
+channel until decided and removed. Disabling approvals prevents further card
+sends for that server.

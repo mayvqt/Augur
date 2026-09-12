@@ -30,16 +30,29 @@ type stateStore interface {
 	ApprovalSettings(ctx context.Context, guildID string) (storage.ApprovalSettings, bool, error)
 	EnabledApprovalSettings(ctx context.Context) ([]storage.ApprovalSettings, error)
 	NeedsApprovalMessage(ctx context.Context, requestID int) (bool, error)
-	ClaimApprovalMessage(ctx context.Context, message storage.ApprovalMessage) (bool, error)
+	QueueUntrackedApprovalCleanup(ctx context.Context, message storage.ApprovalMessage) (bool, error)
+	DueApprovalCleanup(ctx context.Context, now time.Time) ([]storage.ApprovalMessage, error)
+	CompleteApprovalCleanup(ctx context.Context, message storage.ApprovalMessage) error
+	RetryApprovalCleanup(ctx context.Context, message storage.ApprovalMessage, retryAt time.Time) error
+	ClaimApprovalMessage(ctx context.Context, message storage.ApprovalMessage, now time.Time) (storage.ApprovalMessage, bool, error)
 	FinishApprovalMessage(ctx context.Context, message storage.ApprovalMessage) error
-	ReleaseApprovalMessage(ctx context.Context, requestID int, guildID string) error
-	MarkApprovalMessageDecided(ctx context.Context, requestID int, guildID string, decidedAt time.Time) error
+	RetryApprovalMessage(ctx context.Context, message storage.ApprovalMessage, retryAt time.Time) error
+	MarkApprovalMessageDecided(ctx context.Context, message storage.ApprovalMessage, decidedAt time.Time) error
 	DueApprovalMessages(ctx context.Context, before time.Time) ([]storage.ApprovalMessage, error)
-	DeleteApprovalMessage(ctx context.Context, requestID int, guildID string) error
+	DeleteApprovalMessage(ctx context.Context, message storage.ApprovalMessage) error
 	ApprovalMessages(ctx context.Context) ([]storage.ApprovalMessage, error)
-	SetApprovalDecision(ctx context.Context, requestID int, guildID, status, reason string) error
-	ClaimDecisionNotification(ctx context.Context, requestID int, discordID, status string) (bool, error)
-	ReleaseDecisionNotification(ctx context.Context, requestID int, discordID, status string) error
+	SaveDecisionIntent(ctx context.Context, intent storage.DecisionIntent) error
+	DecisionIntent(ctx context.Context, requestID int) (storage.DecisionIntent, bool, error)
+	DueDecisionIntents(ctx context.Context, now time.Time) ([]storage.DecisionIntent, error)
+	ClearDecisionIntent(ctx context.Context, requestID int) error
+	RetryDecisionIntent(ctx context.Context, intent storage.DecisionIntent, retryAt time.Time) error
+	ApprovalDecision(ctx context.Context, requestID int, status string) (storage.ApprovalDecision, bool, error)
+	RecordApprovalDecision(ctx context.Context, decision storage.ApprovalDecision) (storage.ApprovalDecision, error)
+	DueDecisionJobs(ctx context.Context, now time.Time, limit int) ([]storage.DecisionJob, error)
+	RetryDecisionJob(ctx context.Context, job storage.DecisionJob, retryAt time.Time) error
+	CompleteDecisionJob(ctx context.Context, decision storage.ApprovalDecision, at time.Time) error
+	DecisionNotificationHandled(ctx context.Context, requestID int, discordID, status string) (bool, error)
+	RecordDecisionNotification(ctx context.Context, requestID int, discordID, status string) error
 	NotificationPreferences(ctx context.Context, discordID string) (storage.NotificationPreferences, error)
 	SetNotificationPreferences(ctx context.Context, preferences storage.NotificationPreferences) error
 	Ping(ctx context.Context) error
@@ -49,6 +62,8 @@ type stateStore interface {
 type notifier interface {
 	Start(ctx context.Context) error
 	NotifyComplete(ctx context.Context, discordID string, media seer.SearchResult) error
-	ReconcileApprovals(ctx context.Context, approvals []seer.ApprovalRequest) error
+	ReconcileApprovals(ctx context.Context, approvals []seer.ApprovalRequest, pendingIDs map[int]bool) error
+	NotifyDecision(ctx context.Context, discordID string, decision storage.ApprovalDecision) error
+	MaintainApprovals(ctx context.Context) error
 	Close() error
 }

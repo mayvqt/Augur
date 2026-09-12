@@ -248,7 +248,7 @@ func (c *selectionCache) selectSeasonPage(cacheID, key, ownerID string, page int
 	defer c.mu.Unlock()
 	selection, ok := c.selectionLocked(cacheID, key, ownerID)
 	if !ok {
-		return errors.New(expiredSeasonPickerMessage)
+		return errors.New("that season picker expired; run `/request` again")
 	}
 	visible, ok := seasonPage(selection.availableSeasons, page)
 	if !ok {
