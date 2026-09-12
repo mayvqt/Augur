@@ -90,65 +90,67 @@ func resultPickerRow(cacheID, placeholder string, options []discordgo.SelectMenu
 	}}
 }
 
-func seasonPickerComponents(cacheID, key string, seasons []seer.Season, quota *seer.Quota, selected seer.SeasonSelection) []discordgo.MessageComponent {
-	maxSelections := len(seasons)
-	if quota != nil && quota.TV.Restricted && quota.TV.Remaining < maxSelections {
-		maxSelections = quota.TV.Remaining
+const seasonsPerPage = 25
+
+func seasonPage(seasons []seer.Season, page int) ([]seer.Season, bool) {
+	if page < 0 || page > (len(seasons)-1)/seasonsPerPage || len(seasons) == 0 {
+		return nil, false
 	}
-	if maxSelections <= 0 {
+	start := page * seasonsPerPage
+	return seasons[start:min(start+seasonsPerPage, len(seasons))], true
+}
+
+func seasonPickerComponents(cacheID, key string, seasons []seer.Season, quota *seer.Quota, selected seer.SeasonSelection, page int) []discordgo.MessageComponent {
+	visible, ok := seasonPage(seasons, page)
+	if !ok {
 		return backComponents(cacheID)
 	}
-
-	options := make([]discordgo.SelectMenuOption, 0, min(len(seasons), 25))
-	for _, season := range seasons {
-		if len(options) == 25 {
-			break
+	onPage := 0
+	options := make([]discordgo.SelectMenuOption, 0, len(visible))
+	for _, season := range visible {
+		chosen := containsSeason(selected.Numbers, season.SeasonNumber)
+		if chosen {
+			onPage++
 		}
-		label := seasonLabel(season)
 		description := ""
 		if season.EpisodeCount > 0 {
 			description = fmt.Sprintf("%d episodes", season.EpisodeCount)
 		}
 		options = append(options, discordgo.SelectMenuOption{
-			Label:       truncate(label, 100),
-			Description: description,
-			Value:       strconv.Itoa(season.SeasonNumber),
-			Default:     containsSeason(selected.Numbers, season.SeasonNumber),
+			Label: truncate(seasonLabel(season), 100), Description: description,
+			Value: strconv.Itoa(season.SeasonNumber), Default: chosen,
 		})
 	}
-	if len(options) == 0 {
-		return backComponents(cacheID)
+	maxSelections := len(options)
+	if quota != nil && quota.TV.Limited() {
+		maxSelections = min(maxSelections, max(0, quota.TV.Remaining-(len(selected.Numbers)-onPage)))
 	}
-	maxSelections = min(maxSelections, len(options))
 	placeholder := fmt.Sprintf("Choose up to %d season(s)", maxSelections)
-	buttons := []discordgo.MessageComponent{}
-	if quota != nil && !quota.TV.Restricted {
-		buttons = append(buttons, discordgo.Button{
-			CustomID: componentAll + cacheID + ":" + key,
-			Label:    "Request all seasons",
-			Style:    discordgo.PrimaryButton,
-		})
+	if maxSelections == 0 {
+		placeholder = "No quota left; clear other selections first"
 	}
+	rows := []discordgo.MessageComponent{discordgo.ActionsRow{Components: []discordgo.MessageComponent{
+		discordgo.SelectMenu{
+			CustomID: componentSeasons + cacheID + ":" + key + ":" + strconv.Itoa(page), Placeholder: placeholder,
+			MinValues: intPtr(0), MaxValues: max(1, maxSelections), Disabled: maxSelections == 0, Options: options,
+		},
+	}}}
+	pages := (len(seasons) + seasonsPerPage - 1) / seasonsPerPage
+	if pages > 1 {
+		rows = append(rows, discordgo.ActionsRow{Components: []discordgo.MessageComponent{
+			discordgo.Button{CustomID: componentSeasonPage + cacheID + ":" + key + ":" + strconv.Itoa(max(0, page-1)), Label: "Previous seasons", Style: discordgo.SecondaryButton, Disabled: page == 0},
+			discordgo.Button{CustomID: componentSeasonPage + cacheID + ":" + key + ":" + strconv.Itoa(page+1), Label: fmt.Sprintf("Next seasons (%d/%d)", page+1, pages), Style: discordgo.SecondaryButton, Disabled: page == pages-1},
+		}})
+	}
+	buttons := []discordgo.MessageComponent{}
 	if len(selected.Numbers) > 0 {
-		buttons = append([]discordgo.MessageComponent{discordgo.Button{
-			CustomID: componentConfirm + cacheID + ":" + key,
-			Label:    "Request selected seasons",
-			Style:    discordgo.SuccessButton,
-		}}, buttons...)
+		buttons = append(buttons, discordgo.Button{CustomID: componentConfirm + cacheID + ":" + key, Label: fmt.Sprintf("Request %d selected season(s)", len(selected.Numbers)), Style: discordgo.SuccessButton})
+	}
+	if quota != nil && !quota.TV.Limited() {
+		buttons = append(buttons, discordgo.Button{CustomID: componentAll + cacheID + ":" + key, Label: "Request all seasons", Style: discordgo.PrimaryButton})
 	}
 	buttons = append(buttons, backButton(cacheID))
-	return []discordgo.MessageComponent{
-		discordgo.ActionsRow{Components: []discordgo.MessageComponent{
-			discordgo.SelectMenu{
-				CustomID:    componentSeasons + cacheID + ":" + key,
-				Placeholder: placeholder,
-				MinValues:   intPtr(1),
-				MaxValues:   maxSelections,
-				Options:     options,
-			},
-		}},
-		discordgo.ActionsRow{Components: buttons},
-	}
+	return append(rows, discordgo.ActionsRow{Components: buttons})
 }
 
 func backComponents(cacheID string) []discordgo.MessageComponent {
@@ -230,7 +232,7 @@ func relevantQuotaLabel(mediaType string, quota *seer.Quota) string {
 }
 
 func quotaUsageLabel(usage seer.QuotaUsage) string {
-	if !usage.Restricted {
+	if !usage.Limited() {
 		return fmt.Sprintf("%d used · Unlimited", usage.Used)
 	}
 	window := "rolling window"

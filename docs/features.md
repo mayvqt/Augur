@@ -13,7 +13,12 @@
 | `/approvals disable` | Disables approval cards for the server. |
 
 Requests use your linked Seerr account and its permissions and limits by default.
-The all-seasons option requires an unlimited TV quota. Augur checks availability
+The all-seasons option requires an unlimited TV quota. Shows with more than 25
+seasons have Previous/Next controls; selections stay selected across pages and
+share the same remaining quota. Clear a page's selection to free space.
+
+A confirmation submits once. If Seerr's response cannot be confirmed, check
+`/requests` or Seerr before starting another request. Augur checks availability
 in the background and sends completion DMs for requests it tracks.
 
 ## Approval cards

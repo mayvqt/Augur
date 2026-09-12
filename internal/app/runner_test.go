@@ -149,8 +149,8 @@ func TestRunnerRejectsRequestWithoutSeerrID(t *testing.T) {
 
 	if _, err := runner.Request(context.Background(), "123456789012345678", seer.SearchResult{
 		ID: 9, MediaType: "movie", Title: "Arrival",
-	}, seer.SeasonSelection{}); err == nil || !strings.Contains(err.Error(), "valid ID") {
-		t.Fatalf("Request() error = %v, want missing Seerr request ID", err)
+	}, seer.SeasonSelection{}); !errors.Is(err, seer.ErrSubmissionUnknown) {
+		t.Fatalf("Request() error = %v, want uncertain submission outcome", err)
 	}
 }
 
@@ -181,7 +181,7 @@ func TestRunnerTVRequestEnforcesRemainingSeasonQuota(t *testing.T) {
 	seerClient := &fakeSeer{
 		user:  seer.User{ID: 7},
 		found: true,
-		quota: seer.Quota{TV: seer.QuotaUsage{Restricted: true, Remaining: 3}},
+		quota: seer.Quota{TV: seer.QuotaUsage{Limit: 5, Used: 2, Restricted: false, Remaining: 3}},
 		tvDetails: seer.TVDetails{Seasons: []seer.Season{
 			{SeasonNumber: 1}, {SeasonNumber: 2}, {SeasonNumber: 3}, {SeasonNumber: 4},
 		}},
@@ -213,7 +213,7 @@ func TestRunnerTVRequestSubmitsSelectedSeasons(t *testing.T) {
 	seerClient := &fakeSeer{
 		user:  seer.User{ID: 7},
 		found: true,
-		quota: seer.Quota{TV: seer.QuotaUsage{Restricted: true, Remaining: 3}},
+		quota: seer.Quota{TV: seer.QuotaUsage{Limit: 5, Used: 2, Restricted: false, Remaining: 3}},
 		tvDetails: seer.TVDetails{Seasons: []seer.Season{
 			{SeasonNumber: 1}, {SeasonNumber: 2}, {SeasonNumber: 3},
 		}},

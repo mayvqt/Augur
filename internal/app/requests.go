@@ -135,7 +135,7 @@ func (r *Runner) Request(ctx context.Context, discordID string, result seer.Sear
 	}
 	if req.ID <= 0 {
 		r.metrics.requestFailures.Add(1)
-		return seer.Request{}, errors.New("seerr returned a request without a valid ID")
+		return seer.Request{}, seer.ErrSubmissionUnknown
 	}
 	inserted, err := r.store.AddSubscription(ctx, storage.Subscription{
 		RequestID:   req.ID,
@@ -192,7 +192,7 @@ func validateSeasonSelection(mediaType string, selection seer.SeasonSelection, q
 		return seer.SeasonSelection{}, fmt.Errorf("unsupported media type %q", mediaType)
 	}
 	if selection.All {
-		if quota == nil || quota.TV.Restricted {
+		if quota == nil || quota.TV.Limited() {
 			return seer.SeasonSelection{}, &userFacingError{message: "All seasons can only be requested when your TV request limit is unlimited."}
 		}
 		if len(selection.Numbers) != 0 {
@@ -214,7 +214,7 @@ func validateSeasonSelection(mediaType string, selection seer.SeasonSelection, q
 			unique = append(unique, number)
 		}
 	}
-	if quota != nil && quota.TV.Restricted && len(unique) > quota.TV.Remaining {
+	if quota != nil && quota.TV.Limited() && len(unique) > quota.TV.Remaining {
 		return seer.SeasonSelection{}, &userFacingError{
 			message: fmt.Sprintf("You can request %d more TV season(s) in the current quota window.", quota.TV.Remaining),
 		}

@@ -145,7 +145,7 @@ func TestAvailableTitleOffersSeerrLinkAndBack(t *testing.T) {
 func TestRelevantQuotaLabelOnlyShowsSelectedMediaType(t *testing.T) {
 	t.Parallel()
 	quota := &seer.Quota{
-		Movie: seer.QuotaUsage{Days: 7, Limit: 10, Used: 6, Remaining: 4, Restricted: true},
+		Movie: seer.QuotaUsage{Days: 7, Limit: 10, Used: 6, Remaining: 4, Restricted: false},
 		TV:    seer.QuotaUsage{Used: 2},
 	}
 	got := relevantQuotaLabel("movie", quota)
@@ -163,8 +163,8 @@ func TestSeasonPickerEnforcesLimitedQuotaAndHidesAllSeasons(t *testing.T) {
 		{SeasonNumber: 3, Name: "Season 3", EpisodeCount: 6},
 		{SeasonNumber: 4, Name: "Season 4", EpisodeCount: 4},
 	}
-	quota := &seer.Quota{TV: seer.QuotaUsage{Restricted: true, Remaining: 3}}
-	components := seasonPickerComponents("cache", "result", seasons, quota, seer.SeasonSelection{})
+	quota := &seer.Quota{TV: seer.QuotaUsage{Limit: 5, Used: 2, Restricted: false, Remaining: 3}}
+	components := seasonPickerComponents("cache", "result", seasons, quota, seer.SeasonSelection{}, 0)
 
 	menu := components[0].(discordgo.ActionsRow).Components[0].(discordgo.SelectMenu)
 	if menu.MaxValues != 3 {
@@ -180,7 +180,7 @@ func TestSeasonPickerShowsAllSeasonsOnlyForUnlimitedQuota(t *testing.T) {
 	t.Parallel()
 	seasons := []seer.Season{{SeasonNumber: 1}, {SeasonNumber: 2}}
 	quota := &seer.Quota{TV: seer.QuotaUsage{Restricted: false}}
-	components := seasonPickerComponents("cache", "result", seasons, quota, seer.SeasonSelection{})
+	components := seasonPickerComponents("cache", "result", seasons, quota, seer.SeasonSelection{}, 0)
 
 	buttons := components[1].(discordgo.ActionsRow).Components
 	if len(buttons) != 2 {
@@ -195,14 +195,14 @@ func TestSeasonPickerShowsAllSeasonsOnlyForUnlimitedQuota(t *testing.T) {
 func TestSeasonPickerKeepsSelectionAndShowsRequestAction(t *testing.T) {
 	t.Parallel()
 	seasons := []seer.Season{{SeasonNumber: 1}, {SeasonNumber: 2}}
-	quota := &seer.Quota{TV: seer.QuotaUsage{Restricted: true, Remaining: 2}}
-	components := seasonPickerComponents("cache", "result", seasons, quota, seer.SeasonSelection{Numbers: []int{2}})
+	quota := &seer.Quota{TV: seer.QuotaUsage{Limit: 5, Used: 3, Restricted: false, Remaining: 2}}
+	components := seasonPickerComponents("cache", "result", seasons, quota, seer.SeasonSelection{Numbers: []int{2}}, 0)
 	menu := components[0].(discordgo.ActionsRow).Components[0].(discordgo.SelectMenu)
 	if menu.Options[0].Default || !menu.Options[1].Default {
 		t.Fatalf("season defaults = %#v", menu.Options)
 	}
 	button := components[1].(discordgo.ActionsRow).Components[0].(discordgo.Button)
-	if button.CustomID != componentConfirm+"cache:result" || button.Label != "Request selected seasons" {
+	if button.CustomID != componentConfirm+"cache:result" || button.Label != "Request 1 selected season(s)" {
 		t.Fatalf("request button = %#v", button)
 	}
 }

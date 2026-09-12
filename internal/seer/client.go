@@ -89,6 +89,9 @@ type QuotaUsage struct {
 	Restricted bool `json:"restricted"`
 }
 
+// Limited distinguishes a finite quota from Seerr's exhausted-quota flag.
+func (q QuotaUsage) Limited() bool { return q.Limit > 0 }
+
 type TVDetails struct {
 	Seasons []Season `json:"seasons"`
 }
@@ -200,54 +203,6 @@ func (c *Client) Search(ctx context.Context, query string) ([]SearchResult, erro
 	return filtered, nil
 }
 
-func (c *Client) FindUserByDiscordID(ctx context.Context, discordID string) (User, bool, error) {
-	discordID = strings.TrimSpace(discordID)
-	if discordID == "" {
-		return User{}, false, errors.New("discord ID is required")
-	}
-	var matched User
-	seenUsers := make(map[int]struct{})
-	for skip := 0; ; skip += 100 {
-		values := url.Values{}
-		values.Set("take", "100")
-		values.Set("skip", strconv.Itoa(skip))
-		var page struct {
-			Results []User `json:"results"`
-		}
-		if err := c.do(ctx, http.MethodGet, "/api/v1/user?"+values.Encode(), nil, &page); err != nil {
-			return User{}, false, err
-		}
-		for _, user := range page.Results {
-			if user.ID <= 0 {
-				continue
-			}
-			if _, duplicate := seenUsers[user.ID]; duplicate {
-				continue
-			}
-			seenUsers[user.ID] = struct{}{}
-			settings, err := c.NotificationSettings(ctx, user.ID)
-			if err != nil {
-				return User{}, false, err
-			}
-			if settings.HasDiscordID(discordID) {
-				if matched.ID != 0 && matched.ID != user.ID {
-					return User{}, false, fmt.Errorf("discord ID is linked to multiple seerr users (%d and %d)", matched.ID, user.ID)
-				}
-				matched = user
-			}
-		}
-		if len(page.Results) < 100 {
-			return matched, matched.ID != 0, nil
-		}
-		if skip > math.MaxInt-100 {
-			return User{}, false, errors.New("seerr user pagination overflowed")
-		}
-		if len(seenUsers) <= skip {
-			return User{}, false, errors.New("seerr user pagination did not advance")
-		}
-	}
-}
-
 func (c *Client) RequestMedia(ctx context.Context, userID int, mediaType string, mediaID int, seasons SeasonSelection) (Request, error) {
 	if userID < 0 {
 		return Request{}, errors.New("user ID must not be negative")
@@ -290,12 +245,20 @@ func (c *Client) RequestMedia(ctx context.Context, userID int, mediaType string,
 			body["seasons"] = seasons.Numbers
 		}
 	}
-	var out Request
-	if err := c.doAsUser(ctx, http.MethodPost, "/api/v1/request", body, &out, userID); err != nil {
+	if err := ctx.Err(); err != nil {
 		return Request{}, err
 	}
-	if out.ID <= 0 {
-		return Request{}, errors.New("seerr create-request response is missing a valid request ID")
+	var out Request
+	status, err := c.doResponse(ctx, http.MethodPost, "/api/v1/request", body, &out, userID)
+	switch {
+	case status == http.StatusAccepted || status == http.StatusConflict:
+		return Request{}, &submissionError{message: "No new request was created. The title or selected seasons are already requested or available. Check Seerr or choose different seasons."}
+	case status == http.StatusTooManyRequests:
+		return Request{}, err
+	case status >= 400 && status < 500 && status != http.StatusRequestTimeout:
+		return Request{}, &submissionError{message: "Seerr rejected this request. Check your permissions and quota, then start a new search.", cause: err}
+	case err != nil || out.ID <= 0:
+		return Request{}, &submissionError{message: ErrSubmissionUnknown.message, cause: err}
 	}
 	return out, nil
 }
@@ -433,6 +396,9 @@ func (c *Client) NotificationSettings(ctx context.Context, userID int) (Notifica
 	}
 	var out NotificationSettings
 	err := c.do(ctx, http.MethodGet, "/api/v1/user/"+strconv.Itoa(userID)+"/settings/notifications", nil, &out)
+	if err == nil && out.DiscordIDs == nil {
+		err = errors.New("seerr notification settings are missing discordIds")
+	}
 	return out, err
 }
 
@@ -440,27 +406,49 @@ func (c *Client) UserQuota(ctx context.Context, userID int) (Quota, error) {
 	if userID <= 0 {
 		return Quota{}, errors.New("user ID must be positive")
 	}
-	var out Quota
-	err := c.do(ctx, http.MethodGet, "/api/v1/user/"+strconv.Itoa(userID)+"/quota", nil, &out)
-	return out, err
+	type usage struct {
+		Days       int  `json:"days"`
+		Limit      *int `json:"limit"`
+		Used       *int `json:"used"`
+		Remaining  *int `json:"remaining"`
+		Restricted bool `json:"restricted"`
+	}
+	var out struct {
+		Movie *usage `json:"movie"`
+		TV    *usage `json:"tv"`
+	}
+	if err := c.do(ctx, http.MethodGet, "/api/v1/user/"+strconv.Itoa(userID)+"/quota", nil, &out); err != nil {
+		return Quota{}, err
+	}
+	valid := func(u *usage) bool {
+		return u != nil && u.Limit != nil && u.Used != nil && u.Remaining != nil && *u.Limit >= 0 && *u.Used >= 0 && *u.Remaining >= 0
+	}
+	if !valid(out.Movie) || !valid(out.TV) {
+		return Quota{}, errors.New("seerr quota response is incomplete")
+	}
+	convert := func(u *usage) QuotaUsage {
+		return QuotaUsage{Days: u.Days, Limit: *u.Limit, Used: *u.Used, Remaining: *u.Remaining, Restricted: u.Restricted}
+	}
+	return Quota{Movie: convert(out.Movie), TV: convert(out.TV)}, nil
 }
 
-func (c *Client) do(ctx context.Context, method, path string, body any, out any) error {
-	return c.doAsUser(ctx, method, path, body, out, 0)
+func (c *Client) do(ctx context.Context, method, path string, body, out any) error {
+	_, err := c.doResponse(ctx, method, path, body, out, 0)
+	return err
 }
 
-func (c *Client) doAsUser(ctx context.Context, method, path string, body any, out any, userID int) error {
+func (c *Client) doResponse(ctx context.Context, method, path string, body any, out any, userID int) (int, error) {
 	endpoint := safeEndpointPath(path)
 	req, err := c.newRequest(ctx, method, path, body)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if userID > 0 {
 		req.Header.Set("X-Api-User", strconv.Itoa(userID))
 	}
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
@@ -468,24 +456,24 @@ func (c *Client) doAsUser(ctx context.Context, method, path string, body any, ou
 		// Response bodies are deliberately excluded from errors. Upstream errors can
 		// contain reflected request headers, credentials, or other sensitive data,
 		// and these errors are subsequently written to application logs.
-		return &responseError{method: method, path: endpoint, statusCode: resp.StatusCode}
+		return resp.StatusCode, &responseError{method: method, path: endpoint, statusCode: resp.StatusCode}
 	}
 	data, err := readResponseBody(resp.Body)
 	if err != nil {
-		return err
+		return resp.StatusCode, err
 	}
 	if out == nil || len(data) == 0 {
-		return nil
+		return resp.StatusCode, nil
 	}
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.UseNumber()
 	if err := decoder.Decode(out); err != nil {
-		return fmt.Errorf("decode seerr %s %s response: %w", method, endpoint, err)
+		return resp.StatusCode, fmt.Errorf("decode seerr %s %s response: %w", method, endpoint, err)
 	}
 	if err := ensureJSONEOF(decoder); err != nil {
-		return fmt.Errorf("decode seerr %s %s response: %w", method, endpoint, err)
+		return resp.StatusCode, fmt.Errorf("decode seerr %s %s response: %w", method, endpoint, err)
 	}
-	return nil
+	return resp.StatusCode, nil
 }
 
 func drainResponseBody(body io.Reader) {
